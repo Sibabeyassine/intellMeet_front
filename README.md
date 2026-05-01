@@ -91,4 +91,4 @@ bunx vitest run   # unit tests
 
 ## License
 
-Proprietary — IntellMeet © 2025.
+Proprietary — IntellMeet © 2026.
