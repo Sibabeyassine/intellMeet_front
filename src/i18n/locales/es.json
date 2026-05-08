@@ -315,6 +315,17 @@
       "errorRequired": "Nombre de proyecto requerido",
       "errorTeam": "Selecciona un equipo primero"
     },
+    "newResource": {
+      "title": "Añadir un recurso",
+      "description": "Adjunta un documento, imagen o enlace a este proyecto.",
+      "fieldName": "Nombre",
+      "fieldNamePlaceholder": "Spec v2.pdf",
+      "fieldUrl": "URL",
+      "add": "Añadir",
+      "added": "Recurso añadido",
+      "errorRequired": "Nombre y URL obligatorios",
+      "errorProject": "Selecciona un proyecto primero"
+    },
     "invite": {
       "title": "Invita a tu equipo",
       "description": "Envía un enlace de invitación a tus compañeros.",
