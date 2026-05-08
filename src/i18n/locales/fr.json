@@ -235,6 +235,12 @@
       "duePlaceholder": "Vendredi 26 avril",
       "status": "Statut",
       "priority": "Priorité"
+    },
+    "info": {
+      "meeting": "Réunion",
+      "scheduleMeeting": "Planifier une réunion",
+      "resources": "Ressources",
+      "noResources": "Aucun document ou lien attaché."
     }
   },
   "chat": {
