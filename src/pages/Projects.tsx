@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight, ExternalLink, FileText, Image as ImageIcon, Link2, Trash2, Users, Video } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth, addMonths, subMonths } from "date-fns";
 import { AppShell } from "@/components/app/AppShell";
