@@ -315,6 +315,17 @@
       "errorRequired": "Project name required",
       "errorTeam": "Pick a team first"
     },
+    "newResource": {
+      "title": "Add a resource",
+      "description": "Attach a document, image or link to this project.",
+      "fieldName": "Name",
+      "fieldNamePlaceholder": "Spec v2.pdf",
+      "fieldUrl": "URL",
+      "add": "Add",
+      "added": "Resource added",
+      "errorRequired": "Name and URL required",
+      "errorProject": "Pick a project first"
+    },
     "invite": {
       "title": "Invite your team",
       "description": "Send an invite link to your teammates.",
