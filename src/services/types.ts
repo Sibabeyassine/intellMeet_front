@@ -105,6 +105,16 @@ export interface Team {
   createdAt: ISODate;
 }
 
+export type ProjectResourceKind = "link" | "doc" | "image" | "file";
+
+export interface ProjectResource {
+  id: ID;
+  name: string;
+  url: string;
+  kind: ProjectResourceKind;
+  addedAt: ISODate;
+}
+
 export interface Project {
   id: ID;
   teamId: ID;
@@ -112,6 +122,7 @@ export interface Project {
   key: string;              // short code shown on cards (e.g. "Q2")
   color: string;
   description?: string;
+  resources?: ProjectResource[];
   createdAt: ISODate;
 }
 
