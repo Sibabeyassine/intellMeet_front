@@ -231,6 +231,12 @@
       "duePlaceholder": "Pick a date",
       "status": "Status",
       "priority": "Priority"
+    },
+    "info": {
+      "meeting": "Meeting",
+      "scheduleMeeting": "Schedule a meeting",
+      "resources": "Resources",
+      "noResources": "No documents or links attached yet."
     }
   },
   "chat": {
