@@ -1,8 +1,8 @@
 import type { API } from "../api";
 import type {
-  ActionItem, AISuggestion, Channel, ChatMessage, CreateMeetingPayload, CreateProjectPayload,
+  ActionItem, AISuggestion, AddProjectResourcePayload, Channel, ChatMessage, CreateMeetingPayload, CreateProjectPayload,
   CreateTaskPayload, CreateTeamPayload, ID, LoginPayload, Meeting, MeetingSummary, Notification,
-  Project, RegisterPayload, SendMessagePayload, Session, Task, TaskStatus, Team, TranscriptLine, User,
+  Project, ProjectResource, RegisterPayload, SendMessagePayload, Session, Task, TaskStatus, Team, TranscriptLine, User,
 } from "../types";
 import { delay, nowISO, storage, uid } from "./storage";
 import {
