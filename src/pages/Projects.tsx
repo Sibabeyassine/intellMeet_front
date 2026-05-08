@@ -401,4 +401,83 @@ function CalendarView({ tasks, onOpen }: { tasks: Task[]; locale: string; onOpen
   );
 }
 
+// ---------- Project info panel ----------
+function ProjectInfoPanel({ teamName, teamColor }: { teamName: string; teamColor: string }) {
+  const { t } = useTranslation();
+  const project = useCurrentProject();
+  const openModal = useUIStore(s => s.open);
+  const removeResource = useProjectsStore(s => s.removeResource);
+  if (!project) return null;
+  const resources = project.resources ?? [];
+  const iconFor = (kind: string) => {
+    if (kind === "image") return <ImageIcon className="h-3.5 w-3.5" />;
+    if (kind === "doc") return <FileText className="h-3.5 w-3.5" />;
+    if (kind === "link") return <Link2 className="h-3.5 w-3.5" />;
+    return <Paperclip className="h-3.5 w-3.5" />;
+  };
+  return (
+    <div className="border-b border-border bg-card/30 px-6 py-4">
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Project + team */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-mono">{project.key}</span>
+            <h2 className="font-display text-base font-semibold text-foreground">{project.name}</h2>
+          </div>
+          {project.description && <p className="text-xs text-muted-foreground line-clamp-2">{project.description}</p>}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Users className="h-3.5 w-3.5" />
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: `hsl(${teamColor})` }} />
+              {teamName}
+            </span>
+          </div>
+        </div>
+
+        {/* Meeting */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Video className="h-3.5 w-3.5" /> {t("projects.info.meeting")}
+          </div>
+          <Button onClick={() => openModal("new-meeting")} variant="outline" size="sm" className="gap-2">
+            <Plus className="h-3.5 w-3.5" /> {t("projects.info.scheduleMeeting")}
+          </Button>
+        </div>
+
+        {/* Resources */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Paperclip className="h-3.5 w-3.5" /> {t("projects.info.resources")} ({resources.length})
+            </div>
+            <Button onClick={() => openModal("new-resource")} variant="ghost" size="icon-sm">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+          {resources.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("projects.info.noResources")}</p>
+          ) : (
+            <ul className="space-y-1 max-h-28 overflow-y-auto scrollbar-thin">
+              {resources.map(r => (
+                <li key={r.id} className="group flex items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/50">
+                  <span className="text-muted-foreground">{iconFor(r.kind)}</span>
+                  <a href={r.url} target="_blank" rel="noreferrer" className="flex-1 truncate text-foreground hover:underline">{r.name}</a>
+                  <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                  <button
+                    onClick={() => removeResource(project.id, r.id)}
+                    className="text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-destructive"
+                    aria-label="Remove"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default Projects;
