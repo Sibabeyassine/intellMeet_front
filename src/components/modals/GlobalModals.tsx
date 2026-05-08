@@ -32,6 +32,7 @@ export function GlobalModals() {
       <NewChannelModal />
       <NewTeamModal />
       <NewProjectModal />
+      <NewResourceModal />
       <InviteTeamModal />
       <CommandPalette />
     </>
