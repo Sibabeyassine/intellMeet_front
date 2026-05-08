@@ -71,6 +71,23 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     set({ projects: [...get().projects, project], currentProjectId: project.id, currentTeamId: project.teamId });
     return project;
   },
+  async addResource(p) {
+    const resource = await api.projects.addProjectResource(p);
+    set({
+      projects: get().projects.map(pr => pr.id === p.projectId
+        ? { ...pr, resources: [...(pr.resources ?? []), resource] }
+        : pr),
+    });
+    return resource;
+  },
+  async removeResource(projectId, resourceId) {
+    await api.projects.removeProjectResource(projectId, resourceId);
+    set({
+      projects: get().projects.map(pr => pr.id === projectId
+        ? { ...pr, resources: (pr.resources ?? []).filter(r => r.id !== resourceId) }
+        : pr),
+    });
+  },
 
   async create(p) {
     const projectId = p.projectId ?? get().currentProjectId;
