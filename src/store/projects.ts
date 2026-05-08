@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/services";
-import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team } from "@/services";
+import type { AddProjectResourcePayload, CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, ProjectResource, Task, TaskStatus, Team } from "@/services";
 
 interface ProjectsState {
   // entities
