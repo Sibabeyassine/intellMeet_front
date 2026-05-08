@@ -20,6 +20,8 @@ interface ProjectsState {
   setProject: (id: string | null) => void;
   createTeam: (p: CreateTeamPayload) => Promise<Team>;
   createProject: (p: CreateProjectPayload) => Promise<Project>;
+  addResource: (p: AddProjectResourcePayload) => Promise<ProjectResource>;
+  removeResource: (projectId: string, resourceId: string) => Promise<void>;
   create: (p: CreateTaskPayload) => Promise<Task>;
   move: (id: string, status: TaskStatus) => Promise<void>;
   update: (id: string, patch: Partial<Task>) => Promise<Task>;
