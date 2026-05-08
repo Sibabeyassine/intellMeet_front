@@ -149,6 +149,14 @@ const Projects = () => {
           </div>
         </div>
 
+        {/* Project info — team, meeting, resources */}
+        {project && (
+          <ProjectInfoPanel
+            teamName={teams.find(tm => tm.id === currentTeamId)?.name ?? ""}
+            teamColor={teams.find(tm => tm.id === currentTeamId)?.color ?? "var(--primary)"}
+          />
+        )}
+
         {/* View body */}
         <div className="flex-1 overflow-hidden">
           {view === "kanban" && (
