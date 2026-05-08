@@ -6,8 +6,7 @@
 // ============================================================
 
 import type {
-  ActionItem,
-  AISuggestion,
+  ActionItem, AISuggestion, AddProjectResourcePayload,
   Channel,
   ChatMessage,
   CreateMeetingPayload,
@@ -20,6 +19,7 @@ import type {
   MeetingSummary,
   Notification,
   Project,
+  ProjectResource,
   RegisterPayload,
   SendMessagePayload,
   Session,
