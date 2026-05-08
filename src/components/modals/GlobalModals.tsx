@@ -4,6 +4,7 @@ import { EditTaskModal } from "./EditTaskModal";
 import { NewChannelModal } from "./NewChannelModal";
 import { NewTeamModal } from "./NewTeamModal";
 import { NewProjectModal } from "./NewProjectModal";
+import { NewResourceModal } from "./NewResourceModal";
 import { InviteTeamModal } from "./InviteTeamModal";
 import { CommandPalette } from "./CommandPalette";
 import { useEffect } from "react";
