@@ -199,6 +199,32 @@ const projects = {
     storage.set(K.projects, [...all, project]);
     return project;
   },
+  async addProjectResource(p: AddProjectResourcePayload): Promise<ProjectResource> {
+    await delay(150);
+    const all = load(K.projects, seedProjects);
+    const resource: ProjectResource = {
+      id: "res_" + uid(),
+      name: p.name,
+      url: p.url,
+      kind: p.kind ?? (/(\.png|\.jpg|\.jpeg|\.gif|\.webp)$/i.test(p.url) ? "image"
+        : /(\.pdf|\.docx?|\.xlsx?|\.pptx?)$/i.test(p.url) ? "doc"
+        : /^https?:\/\//i.test(p.url) ? "link" : "file"),
+      addedAt: nowISO(),
+    };
+    const next = all.map(pr => pr.id === p.projectId
+      ? { ...pr, resources: [...(pr.resources ?? []), resource] }
+      : pr);
+    storage.set(K.projects, next);
+    return resource;
+  },
+  async removeProjectResource(projectId, resourceId) {
+    await delay(120);
+    const all = load(K.projects, seedProjects);
+    const next = all.map(pr => pr.id === projectId
+      ? { ...pr, resources: (pr.resources ?? []).filter(r => r.id !== resourceId) }
+      : pr);
+    storage.set(K.projects, next);
+  },
   async listTasks(projectId?: ID): Promise<Task[]> {
     await delay();
     const all = load(K.tasks, seedTasks);
