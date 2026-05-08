@@ -6,8 +6,7 @@
 // ============================================================
 
 import type {
-  ActionItem,
-  AISuggestion,
+  ActionItem, AISuggestion, AddProjectResourcePayload,
   Channel,
   ChatMessage,
   CreateMeetingPayload,
@@ -20,6 +19,7 @@ import type {
   MeetingSummary,
   Notification,
   Project,
+  ProjectResource,
   RegisterPayload,
   SendMessagePayload,
   Session,
@@ -56,6 +56,8 @@ export interface ProjectsAPI {
   createTeam(p: CreateTeamPayload): Promise<Team>;
   listProjects(): Promise<Project[]>;
   createProject(p: CreateProjectPayload): Promise<Project>;
+  addProjectResource(p: AddProjectResourcePayload): Promise<ProjectResource>;
+  removeProjectResource(projectId: ID, resourceId: ID): Promise<void>;
   listTasks(projectId?: ID): Promise<Task[]>;
   createTask(p: CreateTaskPayload): Promise<Task>;
   updateTaskStatus(id: ID, status: TaskStatus): Promise<Task>;

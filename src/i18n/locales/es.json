@@ -231,6 +231,12 @@
       "duePlaceholder": "Viernes 26 de abril",
       "status": "Estado",
       "priority": "Prioridad"
+    },
+    "info": {
+      "meeting": "Reunión",
+      "scheduleMeeting": "Programar una reunión",
+      "resources": "Recursos",
+      "noResources": "Ningún documento o enlace adjunto."
     }
   },
   "chat": {
@@ -308,6 +314,17 @@
       "created": "Proyecto creado",
       "errorRequired": "Nombre de proyecto requerido",
       "errorTeam": "Selecciona un equipo primero"
+    },
+    "newResource": {
+      "title": "Añadir un recurso",
+      "description": "Adjunta un documento, imagen o enlace a este proyecto.",
+      "fieldName": "Nombre",
+      "fieldNamePlaceholder": "Spec v2.pdf",
+      "fieldUrl": "URL",
+      "add": "Añadir",
+      "added": "Recurso añadido",
+      "errorRequired": "Nombre y URL obligatorios",
+      "errorProject": "Selecciona un proyecto primero"
     },
     "invite": {
       "title": "Invita a tu equipo",
