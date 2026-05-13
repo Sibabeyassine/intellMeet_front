@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Github, Loader2, Mail, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Loader2, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { useAuthStore, useIsAuthenticated } from "@/store/auth";
 import { z } from "zod";
 import authHero from "@/assets/auth-hero.jpg";
 
-type Mode = "login" | "register";
+type Mode = "login" | "register" | "verify";
 
 const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
   const { t } = useTranslation();
@@ -24,9 +24,13 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
   const location = useLocation();
   const login = useAuthStore(s => s.login);
   const register = useAuthStore(s => s.register);
+  const verifyEmail = useAuthStore(s => s.verifyEmail);
+  const resendVerification = useAuthStore(s => s.resendVerification);
   const loading = useAuthStore(s => s.loading);
   const isAuth = useIsAuthenticated();
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [pendingPassword, setPendingPassword] = useState("");
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/dashboard";
 
   const loginSchema = z.object({
@@ -35,6 +39,9 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
   });
   const registerSchema = loginSchema.extend({
     fullName: z.string().trim().min(2, t("auth.errors.name")).max(80),
+  });
+  const verifySchema = z.object({
+    code: z.string().trim().regex(/^\d{4}$/, "Code de verification invalide"),
   });
 
   useEffect(() => { setCurrent(mode); }, [mode]);
@@ -48,18 +55,33 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
       email: String(fd.get("email") ?? ""),
       password: String(fd.get("password") ?? ""),
       fullName: String(fd.get("name") ?? ""),
+      code: String(fd.get("code") ?? ""),
     };
     try {
-      if (isRegister) {
+      if (current === "verify") {
+        const parsed = verifySchema.parse({ code: data.code });
+        await verifyEmail({ email: pendingEmail, code: parsed.code });
+        await login({ email: pendingEmail, password: pendingPassword });
+        toast.success("Email verifie, connexion reussie");
+        navigate(redirectTo, { replace: true });
+      } else if (isRegister) {
         const parsed = registerSchema.parse(data) as { email: string; password: string; fullName: string };
-        await register(parsed);
-        toast.success(t("auth.registerSuccess"));
+        const session = await register(parsed);
+        if (session) {
+          toast.success(t("auth.registerSuccess"));
+          navigate(redirectTo, { replace: true });
+          return;
+        }
+        setPendingEmail(parsed.email);
+        setPendingPassword(parsed.password);
+        setCurrent("verify");
+        toast.success("Compte cree. Verifie ton email avec le code recu.");
       } else {
         const parsed = loginSchema.parse({ email: data.email, password: data.password }) as { email: string; password: string };
         await login(parsed);
         toast.success(t("auth.loginSuccess"));
+        navigate(redirectTo, { replace: true });
       }
-      navigate(redirectTo, { replace: true });
     } catch (err) {
       if (err instanceof z.ZodError) {
         const map: Record<string, string> = {};
@@ -71,12 +93,14 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
     }
   };
 
-  const ssoDemo = async () => {
+  const resendCode = async () => {
+    if (!pendingEmail) return;
     try {
-      await login({ email: "demo@intellmeet.app", password: "demo1234" });
-      toast.success(t("auth.demoLoggedIn"));
-      navigate(redirectTo, { replace: true });
-    } catch { toast.error(t("auth.errors.generic")); }
+      await resendVerification(pendingEmail);
+      toast.success("Nouveau code envoye");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("auth.errors.generic"));
+    }
   };
 
   return (
@@ -95,51 +119,36 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
         <div className="mx-auto w-full max-w-md py-12">
           <div className="animate-fade-in">
             <h1 className="font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-              {isRegister ? t("auth.registerTitle") : t("auth.loginTitle")}
+              {current === "verify" ? "Verifier ton email" : isRegister ? t("auth.registerTitle") : t("auth.loginTitle")}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              {isRegister ? t("auth.registerSubtitle") : t("auth.loginSubtitle")}
+              {current === "verify" ? `Entre le code a 4 chiffres envoye a ${pendingEmail}.` : isRegister ? t("auth.registerSubtitle") : t("auth.loginSubtitle")}
             </p>
           </div>
 
-          <div className="mt-8 grid gap-2 animate-fade-in">
-            <Button type="button" onClick={ssoDemo} disabled={loading} variant="outline" size="lg" className="gap-2.5">
-              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09Z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.99.66-2.25 1.06-3.72 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23Z"/>
-                <path fill="#FBBC05" d="M5.84 14.11A6.6 6.6 0 0 1 5.5 12c0-.74.13-1.45.34-2.11V7.05H2.18A11 11 0 0 0 1 12c0 1.78.43 3.46 1.18 4.95l3.66-2.84Z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.05l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38Z"/>
-              </svg>
-              {t("auth.continueWithGoogle")}
-            </Button>
-            <Button type="button" onClick={ssoDemo} disabled={loading} variant="outline" size="lg" className="gap-2.5">
-              <Github className="h-4 w-4" /> {t("auth.continueWithGithub")}
-            </Button>
-          </div>
-
-          <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            {t("auth.orWithEmail")}
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
           <form onSubmit={submit} className="space-y-4 animate-fade-in" noValidate>
-            {isRegister && (
+            {current === "verify" ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="code">Code de verification</Label>
+                <Input id="code" name="code" inputMode="numeric" maxLength={4} placeholder="1234" required className="h-11 rounded-xl text-center tracking-[0.4em]" aria-invalid={!!errors.code} />
+                {errors.code && <p className="text-xs text-destructive">{errors.code}</p>}
+              </div>
+            ) : isRegister && (
               <div className="grid gap-1.5">
                 <Label htmlFor="name">{t("auth.fullName")}</Label>
                 <Input id="name" name="name" placeholder={t("auth.fullNamePlaceholder")} required className="h-11 rounded-xl" aria-invalid={!!errors.fullName} />
                 {errors.fullName && <p className="text-xs text-destructive">{errors.fullName}</p>}
               </div>
             )}
-            <div className="grid gap-1.5">
+            {current !== "verify" && <div className="grid gap-1.5">
               <Label htmlFor="email">{t("auth.email")}</Label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input id="email" name="email" type="email" placeholder={t("auth.emailPlaceholder")} required className="h-11 rounded-xl pl-9" aria-invalid={!!errors.email} />
               </div>
               {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
-            </div>
-            <div className="grid gap-1.5">
+            </div>}
+            {current !== "verify" && <div className="grid gap-1.5">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">{t("auth.password")}</Label>
                 {!isRegister && (
@@ -148,9 +157,13 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
               </div>
               <Input id="password" name="password" type="password" placeholder="••••••••" required className="h-11 rounded-xl" aria-invalid={!!errors.password} />
               {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
-            </div>
+            </div>}
 
-            {isRegister ? (
+            {current === "verify" ? (
+              <button type="button" onClick={resendCode} className="text-xs font-medium text-primary hover:underline">
+                Renvoyer le code
+              </button>
+            ) : isRegister ? (
               <label className="flex items-start gap-2 text-xs text-muted-foreground">
                 <Checkbox className="mt-0.5" defaultChecked /> {t("auth.acceptTerms")}
               </label>
@@ -161,19 +174,19 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
             )}
 
             <Button type="submit" variant="hero" size="lg" className="w-full gap-2" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (isRegister ? t("auth.register") : t("auth.login"))}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (current === "verify" ? "Verifier et se connecter" : isRegister ? t("auth.register") : t("auth.login"))}
               {!loading && <ArrowRight className="h-4 w-4" />}
             </Button>
           </form>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            {isRegister ? t("auth.haveAccount") : t("auth.noAccount")}{" "}
+            {current === "verify" ? "Mauvais email ?" : isRegister ? t("auth.haveAccount") : t("auth.noAccount")}{" "}
             <button
               type="button"
-              onClick={() => navigate(isRegister ? "/login" : "/register")}
+              onClick={() => navigate(isRegister || current === "verify" ? "/login" : "/register")}
               className="font-semibold text-primary hover:underline"
             >
-              {isRegister ? t("auth.login") : t("auth.register")}
+              {isRegister || current === "verify" ? t("auth.login") : t("auth.register")}
             </button>
           </p>
 

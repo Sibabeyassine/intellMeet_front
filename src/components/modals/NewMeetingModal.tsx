@@ -27,7 +27,7 @@ export function NewMeetingModal() {
     if (!title) { toast.error(t("modals.newMeeting.errorTitleRequired")); return; }
     setLoading(true);
     try {
-      await create({
+      const meeting = await create({
         title,
         description: String(fd.get("description") ?? ""),
         scheduledAt: new Date(String(fd.get("scheduledAt") ?? new Date().toISOString())).toISOString(),
@@ -36,7 +36,7 @@ export function NewMeetingModal() {
       });
       toast.success(startNow ? t("modals.newMeeting.createdLive") : t("modals.newMeeting.createdScheduled"));
       close();
-      navigate(startNow ? "/meeting" : "/meetings");
+      navigate(startNow ? `/meeting/${meeting.id}` : "/meetings");
     } finally { setLoading(false); }
   };
 

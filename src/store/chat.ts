@@ -16,13 +16,22 @@ interface ChatState {
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  channels: [], dms: [], messages: {}, activeId: "produit", loaded: false,
+  channels: [], dms: [], messages: {}, activeId: "", loaded: false,
   async fetchAll() {
     const [channels, dms] = await Promise.all([api.chat.listChannels(), api.chat.listDMs()]);
-    set({ channels, dms, loaded: true });
-    await get().loadMessages(get().activeId);
+    if (!channels.length && !dms.length) {
+      set({ channels, dms, activeId: "", loaded: true });
+      return;
+    }
+    const activeId =
+      [...channels, ...dms].some(channel => channel.id === get().activeId)
+        ? get().activeId
+        : channels[0]?.id ?? dms[0]?.id ?? get().activeId;
+    set({ channels, dms, activeId, loaded: true });
+    await get().loadMessages(activeId);
   },
   async loadMessages(channelId) {
+    if (!channelId) return;
     if (get().messages[channelId]) return;
     const list = await api.chat.listMessages(channelId);
     set({ messages: { ...get().messages, [channelId]: list } });

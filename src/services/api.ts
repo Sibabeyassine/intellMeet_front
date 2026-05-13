@@ -1,8 +1,7 @@
 // ============================================================
 // API contract — every method the application uses.
-// The mock implementation lives in ./mock. To switch to a real
-// backend, create a new implementation (e.g. ./http) that
-// satisfies this interface and export it from ./index.ts.
+// The HTTP implementation in ./http satisfies this interface and is
+// exported from ./index.ts.
 // ============================================================
 
 import type {
@@ -14,10 +13,12 @@ import type {
   CreateProjectPayload,
   CreateTaskPayload,
   CreateTeamPayload,
+  DashboardOverview,
   ID,
   LoginPayload,
   Meeting,
   MeetingSummary,
+  MediaFile,
   Notification,
   Project,
   RegisterPayload,
@@ -32,7 +33,9 @@ import type {
 
 export interface AuthAPI {
   login(p: LoginPayload): Promise<Session>;
-  register(p: RegisterPayload): Promise<Session>;
+  register(p: RegisterPayload): Promise<Session | null>;
+  verifyEmail(p: { email: string; code: string }): Promise<void>;
+  resendVerification(email: string): Promise<void>;
   logout(): Promise<void>;
   getSession(): Promise<Session | null>;
   updateProfile(patch: Partial<Pick<User, "fullName" | "avatarUrl">>): Promise<User>;
@@ -47,13 +50,14 @@ export interface MeetingsAPI {
   getSummary(id: ID): Promise<MeetingSummary | null>;
   getTranscript(id: ID): Promise<TranscriptLine[]>;
   getActionItems(id: ID): Promise<ActionItem[]>;
-  // realtime hooks (no-op in mock, pluggable in real backend)
+  // realtime hooks
   subscribe(id: ID, cb: (event: { type: string; payload: unknown }) => void): () => void;
 }
 
 export interface ProjectsAPI {
   listTeams(): Promise<Team[]>;
   createTeam(p: CreateTeamPayload): Promise<Team>;
+  inviteTeamMembers(teamId: ID, emails: string[]): Promise<void>;
   listProjects(): Promise<Project[]>;
   createProject(p: CreateProjectPayload): Promise<Project>;
   listTasks(projectId?: ID): Promise<Task[]>;
@@ -77,9 +81,18 @@ export interface NotificationsAPI {
   markAllRead(): Promise<void>;
 }
 
+export interface MediaAPI {
+  uploadMeetingFile(meetingId: ID, file: File): Promise<MediaFile>;
+  listMeetingFiles(meetingId: ID): Promise<MediaFile[]>;
+}
+
 export interface AIAPI {
   generateSuggestions(meetingId: ID): Promise<AISuggestion[]>;
   ask(prompt: string, context?: { meetingId?: ID; channelId?: ID }): Promise<string>;
+}
+
+export interface DashboardAPI {
+  overview(workspaceId?: ID): Promise<DashboardOverview>;
 }
 
 export interface API {
@@ -88,5 +101,7 @@ export interface API {
   projects: ProjectsAPI;
   chat: ChatAPI;
   notifications: NotificationsAPI;
+  media: MediaAPI;
   ai: AIAPI;
+  dashboard: DashboardAPI;
 }

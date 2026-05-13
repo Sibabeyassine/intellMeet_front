@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Copy, Loader2, Mail, UserPlus } from "lucide-react";
 import { useUIStore } from "@/store/ui";
+import { useProjectsStore } from "@/store/projects";
+import { api } from "@/services";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
@@ -15,6 +17,8 @@ export function InviteTeamModal() {
   const { t } = useTranslation();
   const open = useUIStore(s => s.modal === "invite");
   const close = useUIStore(s => s.close);
+  const currentTeamId = useProjectsStore(s => s.currentTeamId);
+  const teams = useProjectsStore(s => s.teams);
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -22,11 +26,18 @@ export function InviteTeamModal() {
     const fd = new FormData(e.currentTarget);
     const emails = String(fd.get("emails") ?? "").split(/[,\s]+/).filter(Boolean);
     if (!emails.length) { toast.error(t("modals.newChannel.errorRequired")); return; }
+    const teamId = currentTeamId ?? teams[0]?.id;
+    if (!teamId) { toast.error("Cree un workspace avant d'inviter un membre"); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 500));
-    setLoading(false);
-    toast.success(t("modals.invite.sent"));
-    close();
+    try {
+      await api.projects.inviteTeamMembers(teamId, emails);
+      toast.success(t("modals.invite.sent"));
+      close();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Invitation impossible");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const copy = () => { navigator.clipboard?.writeText(inviteLink); toast.success(t("common.copied")); };

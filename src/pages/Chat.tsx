@@ -10,58 +10,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-type ChannelKind = "channel" | "dm";
-
-type Channel = {
-  id: string;
-  name: string;
-  kind: ChannelKind;
-  unread?: number;
-  online?: boolean;
-  color?: string;
-  initials?: string;
-  lastSeen?: string;
-};
-
-const channels: Channel[] = [
-  { id: "produit", name: "produit", kind: "channel", unread: 2 },
-  { id: "design", name: "design", kind: "channel", unread: 0 },
-  { id: "engineering", name: "engineering", kind: "channel", unread: 5 },
-  { id: "random", name: "random", kind: "channel" },
-  { id: "annonces", name: "annonces", kind: "channel" },
-];
-
-const dms: Channel[] = [
-  { id: "lea", name: "Léa Moreau", kind: "dm", online: true, color: "221 83% 53%", initials: "LM", unread: 1 },
-  { id: "marc", name: "Marc Dubois", kind: "dm", online: true, color: "38 92% 55%", initials: "MD" },
-  { id: "sofia", name: "Sofia Rinaldi", kind: "dm", online: false, color: "330 75% 55%", initials: "SR", lastSeen: "il y a 1h" },
-  { id: "amira", name: "Amira Haddad", kind: "dm", online: true, color: "190 80% 45%", initials: "AH" },
-  { id: "kenji", name: "Kenji Tanaka", kind: "dm", online: false, color: "265 70% 60%", initials: "KT", lastSeen: "hier" },
-];
-
-type Msg = {
-  id: string;
-  authorName: string;
-  initials: string;
-  color: string;
-  time: string;
-  text: string;
-  isYou?: boolean;
-  reactions?: { emoji: string; count: number }[];
-  ai?: boolean;
-};
-
-const seedMessages: Record<string, Msg[]> = {
-  produit: [
-    { id: "p1", authorName: "Léa Moreau", initials: "LM", color: "221 83% 53%", time: "09:42", text: "Hello team 👋 dispo pour le sync produit dans 15 min ?" },
-    { id: "p2", authorName: "Marc Dubois", initials: "MD", color: "38 92% 55%", time: "09:43", text: "Yes, j'arrive avec les chiffres Stripe", reactions: [{ emoji: "🔥", count: 3 }] },
-    { id: "p3", authorName: "Sofia Rinaldi", initials: "SR", color: "330 75% 55%", time: "09:45", text: "Mockups push sur Figma : https://figma.com/intellmeet-onb-v2" },
-    { id: "p4", authorName: "IntellMeet AI", initials: "AI", color: "265 70% 60%", time: "09:46", text: "📌 J'ai créé 4 action items à partir du sync produit de ce matin. Tu veux les voir ?", ai: true },
-    { id: "p5", authorName: "Toi", initials: "VB", color: "152 70% 45%", time: "09:48", text: "Top, on regarde ça après le call ✨", isYou: true, reactions: [{ emoji: "👍", count: 2 }] },
-    { id: "p6", authorName: "Amira Haddad", initials: "AH", color: "190 80% 45%", time: "09:55", text: "Je rejoins, j'ai aussi update sur la doc API." },
-  ],
-};
+import type { Channel, ChatMessage } from "@/services";
 
 const Chat = () => {
   const { t } = useTranslation();
@@ -76,17 +25,15 @@ const Chat = () => {
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
-  const allChannels = channelsLive.length ? channelsLive : channels;
-  const allDms = dmsLive.length ? dmsLive : dms;
-  const active = [...allChannels, ...allDms].find(c => c.id === activeId) ?? allChannels[0] ?? channels[0];
-  const messages = (messagesMap[activeId] ?? seedMessages[activeId] ?? []) as Msg[];
+  const active = [...channelsLive, ...dmsLive].find(c => c.id === activeId) ?? channelsLive[0] ?? dmsLive[0];
+  const messages = active ? (messagesMap[active.id] ?? []) as ChatMessage[] : [];
   const [input, setInput] = useState("");
 
   const switchChannel = (id: string) => setActive(id);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || !active) return;
     const text = input.trim();
     setInput("");
     await send(text);
@@ -97,7 +44,6 @@ const Chat = () => {
       <AppTopbar title={t("chat.title")} description={t("chat.subtitle")} />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[260px_1fr]">
-        {/* Channels list */}
         <div className="flex min-h-0 flex-col border-r border-border bg-card/40">
           <div className="border-b border-border p-3">
             <div className="relative">
@@ -112,31 +58,39 @@ const Chat = () => {
                 <button onClick={() => openModal("new-channel")} aria-label={t("chat.newChannel")} className="hover:text-foreground"><Plus className="h-3 w-3" /></button>
               </SectionLabel>
               <ul className="mt-1 space-y-0.5">
-                {allChannels.map(c => (
-                  <ChannelItem key={c.id} channel={c} active={activeId === c.id} onClick={() => switchChannel(c.id)} />
+                {channelsLive.map(c => (
+                  <ChannelItem key={c.id} channel={c} active={active?.id === c.id} onClick={() => switchChannel(c.id)} />
                 ))}
               </ul>
               <SectionLabel className="mt-5">{t("chat.directMessages")} <Plus className="h-3 w-3" /></SectionLabel>
               <ul className="mt-1 space-y-0.5">
-                {allDms.map(c => (
-                  <ChannelItem key={c.id} channel={c} active={activeId === c.id} onClick={() => switchChannel(c.id)} />
+                {dmsLive.map(c => (
+                  <ChannelItem key={c.id} channel={c} active={active?.id === c.id} onClick={() => switchChannel(c.id)} />
                 ))}
               </ul>
+              {!channelsLive.length && !dmsLive.length && (
+                <p className="px-2 py-4 text-sm text-muted-foreground">
+                  Aucun canal disponible. Crée ou ouvre une réunion pour activer son chat.
+                </p>
+              )}
             </div>
           </ScrollArea>
         </div>
 
-        {/* Conversation */}
         <div className="flex min-h-0 flex-col">
-          {/* header */}
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card/40 px-5">
             <div className="flex min-w-0 items-center gap-3">
-              {active.kind === "channel" ? (
+              {!active ? (
+                <div>
+                  <p className="font-display text-sm font-semibold text-foreground">Chat</p>
+                  <p className="text-[11px] text-muted-foreground">Aucune conversation disponible</p>
+                </div>
+              ) : active.kind === "channel" ? (
                 <>
                   <Hash className="h-5 w-5 text-muted-foreground" />
                   <div>
                     <p className="font-display text-sm font-semibold text-foreground">{active.name}</p>
-                    <p className="text-[11px] text-muted-foreground">8 {t("common.members")} · {t("chat.topic")} : roadmap & releases</p>
+                    <p className="text-[11px] text-muted-foreground">{active.topic ?? t("chat.topic")}</p>
                   </div>
                 </>
               ) : (
@@ -144,9 +98,9 @@ const Chat = () => {
                   <div className="relative">
                     <div
                       className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold text-white"
-                      style={{ backgroundColor: `hsl(${active.color})` }}
+                      style={{ backgroundColor: `hsl(${active.color ?? "221 83% 53%"})` }}
                     >
-                      {active.initials}
+                      {active.initials ?? active.name.slice(0, 2).toUpperCase()}
                     </div>
                     {active.online && <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-success ring-2 ring-background" />}
                   </div>
@@ -165,13 +119,12 @@ const Chat = () => {
             </div>
           </div>
 
-          {/* messages */}
           <ScrollArea className="flex-1">
             <div className="space-y-1 p-5">
               <div className="mx-auto my-4 flex max-w-md items-center gap-3 text-[11px] text-muted-foreground">
                 <span className="h-px flex-1 bg-border" /> {t("chat.today")} <span className="h-px flex-1 bg-border" />
               </div>
-              {messages.map((m, i) => {
+              {messages.length ? messages.map((m, i) => {
                 const prev = messages[i - 1];
                 const grouped = prev && prev.authorName === m.authorName;
                 return (
@@ -208,22 +161,26 @@ const Chat = () => {
                     </div>
                   </div>
                 );
-              })}
+              }) : (
+                <p className="mx-auto my-10 max-w-md rounded-xl border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                  Aucun message pour cette conversation.
+                </p>
+              )}
             </div>
           </ScrollArea>
 
-          {/* composer */}
           <form onSubmit={handleSend} className="border-t border-border bg-card/40 p-4">
             <div className="flex items-end gap-2 rounded-2xl border border-border bg-background p-2 transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
               <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground"><Paperclip className="h-4 w-4" /></Button>
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={t("chat.messagePlaceholder", { target: active.kind === "channel" ? "#" + active.name : active.name })}
+                disabled={!active}
+                placeholder={active ? t("chat.messagePlaceholder", { target: active.kind === "channel" ? "#" + active.name : active.name }) : "Aucune conversation sélectionnée"}
                 className="border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
               <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground"><Smile className="h-4 w-4" /></Button>
-              <Button type="submit" size="icon-sm" className="bg-gradient-accent text-primary-foreground hover:brightness-110">
+              <Button type="submit" size="icon-sm" disabled={!active} className="bg-gradient-accent text-primary-foreground hover:brightness-110">
                 <Send className="h-4 w-4" />
               </Button>
             </div>
@@ -261,9 +218,9 @@ function ChannelItem({ channel, active, onClick }: { channel: Channel; active: b
           <span className="relative">
             <span
               className="flex h-5 w-5 items-center justify-center rounded text-[8px] font-bold text-white"
-              style={{ backgroundColor: `hsl(${channel.color})` }}
+              style={{ backgroundColor: `hsl(${channel.color ?? "221 83% 53%"})` }}
             >
-              {channel.initials}
+              {channel.initials ?? channel.name.slice(0, 2).toUpperCase()}
             </span>
             {channel.online && <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-success ring-2 ring-sidebar" />}
           </span>

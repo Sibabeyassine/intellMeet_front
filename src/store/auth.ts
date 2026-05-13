@@ -8,7 +8,9 @@ interface AuthState {
   initialized: boolean;
   hydrate: () => Promise<void>;
   login: (p: LoginPayload) => Promise<void>;
-  register: (p: RegisterPayload) => Promise<void>;
+  register: (p: RegisterPayload) => Promise<Session | null>;
+  verifyEmail: (p: { email: string; code: string }) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (patch: Partial<Pick<User, "fullName" | "avatarUrl">>) => Promise<void>;
 }
@@ -33,7 +35,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true });
     try {
       const session = await api.auth.register(p);
-      set({ session });
+      if (session) set({ session });
+      return session;
+    } finally { set({ loading: false }); }
+  },
+  async verifyEmail(p) {
+    set({ loading: true });
+    try {
+      await api.auth.verifyEmail(p);
+    } finally { set({ loading: false }); }
+  },
+  async resendVerification(email) {
+    set({ loading: true });
+    try {
+      await api.auth.resendVerification(email);
     } finally { set({ loading: false }); }
   },
   async logout() {

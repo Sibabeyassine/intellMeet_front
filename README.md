@@ -50,10 +50,11 @@ src/
    ```
 3. Set env vars (`.env`):
    ```env
-   VITE_API_URL=https://api.intellmeet.io/api/v1
-   VITE_WS_URL=wss://api.intellmeet.io
-   VITE_TURN_URL=turn:turn.intellmeet.io:3478
+   VITE_API_URL=http://localhost:8000/api
+   VITE_WS_URL=http://localhost:8000
    ```
+
+For local integration, make sure the backend `CORS_ORIGIN` includes the frontend URL, usually `http://localhost:8080`.
 
 A complete backend spec (REST endpoints, Socket.io events, WebRTC signaling, Postgres schema, Helm/K8s deployment) lives in `/mnt/documents/architecture/`:
 - `01_ARCHITECTURE.md` — overview, stack, security, observability, migration plan

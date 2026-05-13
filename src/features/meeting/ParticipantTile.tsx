@@ -1,6 +1,6 @@
 import { Mic, MicOff, Pin, ScreenShare, Video, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Participant } from "./mock";
+import type { Participant } from "@/services";
 
 interface Props {
   participant: Participant;

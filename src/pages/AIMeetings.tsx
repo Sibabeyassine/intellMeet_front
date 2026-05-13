@@ -16,6 +16,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/modals/ConfirmDialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useMeetingsStore } from "@/store/meetings";
+import { api, type ActionItem, type Meeting as ApiMeeting, type MeetingSummary, type TranscriptLine } from "@/services";
 
 type Meeting = {
   id: string;
@@ -32,114 +34,81 @@ type Meeting = {
   transcript: { time: string; author: string; text: string }[];
 };
 
-const seedMeetings: Meeting[] = [
-  {
-    id: "m1",
-    title: "Sync produit — Roadmap Q2",
-    date: "25/04 · 10:00",
-    duration: "32 min",
-    participants: 6,
-    color: "221 83% 53%",
-    tags: ["product", "roadmap"],
-    summary: "L'équipe a validé la roadmap Q2 avec un focus sur la finalisation de Stripe et le lancement de l'onboarding v2.",
-    highlights: [
-      "Validation de la roadmap Q2 produit.",
-      "Intégration Stripe en retard, priorité haute.",
-      "Mockups onboarding finalisés et validés.",
-      "Documentation API à livrer vendredi.",
-    ],
-    decisions: ["Review interne planifiée jeudi 15h.", "Sprint Stripe priorité haute."],
-    actions: [
-      { id: "a1", title: "Finaliser intégration Stripe", assignee: "Marc", done: false },
-      { id: "a2", title: "Pousser mockups onboarding", assignee: "Sofia", done: false },
-      { id: "a3", title: "Rédiger doc API partenaires", assignee: "Amira", done: false },
-      { id: "a4", title: "Bloquer review interne", assignee: "Léa", done: true },
-    ],
-    transcript: [
-      { time: "00:14", author: "Léa", text: "Objectif aujourd'hui : valider la roadmap Q2." },
-      { time: "00:42", author: "Marc", text: "On a un retard sur Stripe, il faut prioriser." },
-      { time: "01:18", author: "Sofia", text: "Mockups onboarding prêts, je les pousse aujourd'hui." },
-      { time: "01:55", author: "Amira", text: "Doc API partenaires prête vendredi." },
-    ],
-  },
-  {
-    id: "m2",
-    title: "Hiring sync — Engineering",
-    date: "24/04 · 16:00",
-    duration: "45 min",
-    participants: 4,
-    color: "152 70% 45%",
-    tags: ["hiring", "engineering"],
-    summary: "Revue du pipeline candidats Senior Backend. 3 finalistes identifiés, décisions attendues sous une semaine.",
-    highlights: ["3 finalistes Senior Backend", "Offre à préparer pour la candidate prioritaire", "Process à raccourcir d'1 semaine"],
-    decisions: ["Faire offre à candidat A vendredi", "Réduire le process à 3 étapes"],
-    actions: [
-      { id: "b1", title: "Préparer offre candidat A", assignee: "Sarah", done: false },
-      { id: "b2", title: "Mettre à jour la job description", assignee: "Marc", done: true },
-    ],
-    transcript: [
-      { time: "00:10", author: "Sarah", text: "On a 3 finalistes très solides cette fois." },
-      { time: "00:35", author: "Marc", text: "Le process est trop long, on perd des candidats." },
-    ],
-  },
-  {
-    id: "m3",
-    title: "Design review — Onboarding v2",
-    date: "23/04 · 14:00",
-    duration: "1h05",
-    participants: 5,
-    color: "330 75% 55%",
-    tags: ["design", "onboarding"],
-    summary: "Présentation des nouveaux écrans onboarding. L'équipe valide la direction avec quelques ajustements UX.",
-    highlights: ["Direction visuelle validée", "Réduction du nombre d'étapes (5 → 3)", "Tests utilisateurs prévus la semaine prochaine"],
-    decisions: ["Lancer tests utilisateurs lundi", "Itérer sur l'écran 2"],
-    actions: [
-      { id: "c1", title: "Recruter 5 testeurs", assignee: "Sofia", done: false },
-      { id: "c2", title: "Itérer écran 2", assignee: "Sofia", done: false },
-    ],
-    transcript: [
-      { time: "00:05", author: "Sofia", text: "Nouvelle direction onboarding, plus visuelle." },
-      { time: "00:40", author: "Léa", text: "On valide, juste l'écran 2 à revoir." },
-    ],
-  },
-  {
-    id: "m4",
-    title: "All-hands hebdomadaire",
-    date: "22/04 · 16:00",
-    duration: "55 min",
-    participants: 24,
-    color: "38 92% 55%",
-    tags: ["all-hands", "company"],
-    summary: "Bilan de la semaine : MRR +12%, lancement beta, objectifs Q2 partagés avec toute l'équipe.",
-    highlights: ["MRR +12% vs. semaine précédente", "Beta lancée à 35 clients", "Objectifs Q2 alignés"],
-    decisions: ["Hire 2 ingénieurs Q2", "Doubler le budget marketing en mai"],
-    actions: [
-      { id: "d1", title: "Lancer campagne marketing mai", assignee: "Léa", done: false },
-      { id: "d2", title: "Publier 2 offres engineering", assignee: "Sarah", done: true },
-    ],
-    transcript: [
-      { time: "00:08", author: "Léa", text: "On est en croissance forte, +12% cette semaine." },
-      { time: "00:30", author: "Marc", text: "On va devoir scaler l'équipe." },
-    ],
-  },
-];
+const COLORS = ["221 83% 53%", "152 70% 45%", "330 75% 55%", "38 92% 55%", "265 70% 60%", "190 80% 45%"];
 
-const STORAGE_KEY = "intellmeet.meetings.deleted";
+type MeetingDetails = {
+  summary: MeetingSummary | null;
+  actions: ActionItem[];
+  transcript: TranscriptLine[];
+};
+
+const summaryText = (meeting: ApiMeeting, details?: MeetingDetails) => {
+  const highlights = details?.summary?.highlights ?? [];
+  if (highlights.length) return highlights.join(" ");
+  return meeting.description ??
+    "Aucun resume IA disponible pour cette reunion. Lance l'analyse IA depuis le backend pour generer un summary.";
+};
+
+const mapApiMeeting = (meeting: ApiMeeting, index: number, details?: MeetingDetails): Meeting => ({
+  id: meeting.id,
+  title: meeting.title,
+  date: new Date(meeting.scheduledAt).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }),
+  duration: `${meeting.durationMin} min`,
+  participants: meeting.participants.length || 1,
+  color: COLORS[index % COLORS.length],
+  tags: meeting.hasAISummary ? ["ai", "summary"] : ["meeting"],
+  summary: summaryText(meeting, details),
+  highlights: details?.summary?.highlights ?? [],
+  decisions: details?.summary?.decisions ?? [],
+  actions: (details?.actions ?? []).map((item) => ({
+    id: item.id,
+    title: item.title,
+    assignee: item.assignee,
+    done: item.status === "done"
+  })),
+  transcript: (details?.transcript ?? []).map((line) => ({
+    time: line.time,
+    author: line.authorName,
+    text: line.text
+  }))
+});
 
 const AIMeetings = () => {
   const { t } = useTranslation();
-  const [deleted, setDeleted] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"); } catch { return []; }
-  });
-  const meetings = seedMeetings.filter(m => !deleted.includes(m.id));
+  const apiMeetings = useMeetingsStore(s => s.list);
+  const fetchMeetings = useMeetingsStore(s => s.fetch);
+  const removeMeeting = useMeetingsStore(s => s.remove);
+  const [detailsById, setDetailsById] = useState<Record<string, MeetingDetails>>({});
+  const meetings = apiMeetings.map((meeting, index) => mapApiMeeting(meeting, index, detailsById[meeting.id]));
   const [selectedId, setSelectedId] = useState(meetings[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
   const selected = meetings.find(m => m.id === selectedId) ?? meetings[0];
 
+  useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(deleted));
-  }, [deleted]);
+    if (!selectedId || detailsById[selectedId]) return;
+    let alive = true;
+    void Promise.all([
+      api.meetings.getSummary(selectedId),
+      api.meetings.getActionItems(selectedId),
+      api.meetings.getTranscript(selectedId)
+    ]).then(([summary, actions, transcript]) => {
+      if (!alive) return;
+      setDetailsById(current => ({
+        ...current,
+        [selectedId]: { summary, actions, transcript }
+      }));
+    });
+
+    return () => { alive = false; };
+  }, [detailsById, selectedId]);
 
   useEffect(() => {
     if (!meetings.find(m => m.id === selectedId) && meetings[0]) setSelectedId(meetings[0].id);
@@ -153,7 +122,7 @@ const AIMeetings = () => {
 
   const handleDelete = () => {
     if (!selected) return;
-    setDeleted(d => [...d, selected.id]);
+    void removeMeeting(selected.id);
     toast.success(t("meetings.deleted"));
     setConfirmDel(false);
   };
@@ -261,7 +230,7 @@ const AIMeetings = () => {
                   <Share2 className="h-4 w-4" /> {t("meetings.share")}
                 </Button>
                 <Button asChild variant="ghost" size="sm" className="gap-2 text-muted-foreground">
-                  <Link to="/meeting"><Video className="h-4 w-4" /> {t("meetings.rejoin")}</Link>
+                  <Link to={`/meeting/${selected.id}`}><Video className="h-4 w-4" /> {t("meetings.rejoin")}</Link>
                 </Button>
                 <Button variant="ghost" size="sm" className="gap-2 text-destructive hover:text-destructive ml-auto" onClick={() => setConfirmDel(true)}>
                   <Trash2 className="h-4 w-4" /> {t("common.delete")}
@@ -281,21 +250,29 @@ const AIMeetings = () => {
               <div className="mt-6 grid gap-6 sm:grid-cols-2">
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("meetings.highlights")}</h4>
-                  <ul className="mt-2 space-y-2">
-                    {selected.highlights.map((h, i) => (
-                      <li key={i} className="flex gap-2 text-sm text-foreground/90">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> {h}
-                      </li>
-                    ))}
-                  </ul>
+                  {selected.highlights.length ? (
+                    <ul className="mt-2 space-y-2">
+                      {selected.highlights.map((h, i) => (
+                        <li key={i} className="flex gap-2 text-sm text-foreground/90">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> {h}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted-foreground">{t("common.empty")}</p>
+                  )}
                 </div>
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("meetings.decisions")}</h4>
-                  <ul className="mt-2 space-y-2">
-                    {selected.decisions.map((d, i) => (
-                      <li key={i} className="rounded-lg bg-primary/5 px-3 py-2 text-sm text-foreground/90">{d}</li>
-                    ))}
-                  </ul>
+                  {selected.decisions.length ? (
+                    <ul className="mt-2 space-y-2">
+                      {selected.decisions.map((d, i) => (
+                        <li key={i} className="rounded-lg bg-primary/5 px-3 py-2 text-sm text-foreground/90">{d}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted-foreground">{t("common.empty")}</p>
+                  )}
                 </div>
               </div>
             </Card>
@@ -314,32 +291,40 @@ const AIMeetings = () => {
                   </TabsList>
                 </div>
                 <TabsContent value="actions" className="m-0 p-2">
-                  <ul className="divide-y divide-border">
-                    {selected.actions.map(a => (
-                      <li key={a.id} className="flex items-center gap-3 px-4 py-3 transition hover:bg-muted/40">
-                        {a.done ? (
-                          <CheckCircle2 className="h-4 w-4 text-success" />
-                        ) : (
-                          <Circle className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        <span className={cn("flex-1 text-sm", a.done ? "text-muted-foreground line-through" : "text-foreground")}>
-                          {a.title}
-                        </span>
-                        <Badge variant="secondary" className="text-[10px]">{a.assignee}</Badge>
-                      </li>
-                    ))}
-                  </ul>
+                  {selected.actions.length ? (
+                    <ul className="divide-y divide-border">
+                      {selected.actions.map(a => (
+                        <li key={a.id} className="flex items-center gap-3 px-4 py-3 transition hover:bg-muted/40">
+                          {a.done ? (
+                            <CheckCircle2 className="h-4 w-4 text-success" />
+                          ) : (
+                            <Circle className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span className={cn("flex-1 text-sm", a.done ? "text-muted-foreground line-through" : "text-foreground")}>
+                            {a.title}
+                          </span>
+                          <Badge variant="secondary" className="text-[10px]">{a.assignee}</Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="p-4 text-sm text-muted-foreground">{t("common.empty")}</p>
+                  )}
                 </TabsContent>
                 <TabsContent value="transcript" className="m-0 p-4 space-y-3">
-                  {selected.transcript.map((tr, i) => (
-                    <div key={i} className="flex gap-3 text-sm">
-                      <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{tr.time}</span>
-                      <div>
-                        <span className="font-semibold text-foreground">{tr.author}</span>
-                        <span className="ml-2 text-foreground/90">{tr.text}</span>
+                  {selected.transcript.length ? (
+                    selected.transcript.map((tr, i) => (
+                      <div key={i} className="flex gap-3 text-sm">
+                        <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{tr.time}</span>
+                        <div>
+                          <span className="font-semibold text-foreground">{tr.author}</span>
+                          <span className="ml-2 text-foreground/90">{tr.text}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t("common.empty")}</p>
+                  )}
                 </TabsContent>
               </Tabs>
             </Card>

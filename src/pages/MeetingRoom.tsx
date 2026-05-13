@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Copy, Lock, Users } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ParticipantTile } from "@/features/meeting/ParticipantTile";
 import { MeetingControls } from "@/features/meeting/MeetingControls";
 import { MeetingSidebar } from "@/features/meeting/MeetingSidebar";
 import { AIPanel } from "@/features/meeting/AIPanel";
-import { mockParticipants } from "@/features/meeting/mock";
+import { api, type ActionItem, type AISuggestion, type Meeting, type MeetingSummary, type Participant, type TranscriptLine } from "@/services";
+import { useUser } from "@/store/auth";
+import { useMeetingsStore } from "@/store/meetings";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -16,17 +18,75 @@ import { toast } from "sonner";
 
 const MeetingRoom = () => {
   const { t } = useTranslation();
+  const { meetingId } = useParams();
+  const navigate = useNavigate();
+  const user = useUser();
+  const meetings = useMeetingsStore(s => s.list);
+  const fetchMeetings = useMeetingsStore(s => s.fetch);
   const [micOn, setMicOn] = useState(true);
   const [cameraOn, setCameraOn] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showAI, setShowAI] = useState(true);
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [summary, setSummary] = useState<MeetingSummary | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
+
+  useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
+
+  useEffect(() => {
+    const id = meetingId ?? meetings[0]?.id;
+    if (!id) return;
+
+    if (!meetingId) {
+      navigate(`/meeting/${id}`, { replace: true });
+      return;
+    }
+
+    let alive = true;
+    setSummary(null);
+    setTranscript([]);
+    setActionItems([]);
+    setSuggestions([]);
+    void Promise.all([
+      api.meetings.get(id),
+      api.meetings.getSummary(id),
+      api.meetings.getTranscript(id),
+      api.meetings.getActionItems(id),
+      api.ai.generateSuggestions(id).catch(() => [])
+    ]).then(([loadedMeeting, loadedSummary, loadedTranscript, loadedActions, loadedSuggestions]) => {
+      if (!alive) return;
+      setMeeting(loadedMeeting);
+      setSummary(loadedSummary);
+      setTranscript(loadedTranscript);
+      setActionItems(loadedActions);
+      setSuggestions(loadedSuggestions);
+    });
+
+    return () => { alive = false; };
+  }, [meetingId, meetings, navigate]);
 
   // "you" reflects toggles
-  const participants = mockParticipants.map(p =>
-    p.isYou ? { ...p, isMuted: !micOn, isCameraOn: cameraOn } : p
-  );
+  const participants = useMemo(() => {
+    const fallbackParticipant: Participant = {
+      id: user?.id ?? "current-user",
+      name: user?.fullName ?? "Utilisateur",
+      initials: user?.initials ?? "U",
+      color: user?.color ?? "221 83% 53%",
+      isYou: true,
+      isHost: meeting?.hostId === user?.id,
+      isSpeaking: true
+    };
+    const source = meeting?.participants?.length ? meeting.participants : [fallbackParticipant];
+    return source.map(p =>
+      p.isYou || p.id === user?.id ? { ...p, isYou: true, isMuted: !micOn, isCameraOn: cameraOn } : p
+    );
+  }, [cameraOn, meeting, micOn, user]);
   const mainSpeaker = participants.find(p => p.isSpeaking) ?? participants[0];
   const others = participants.filter(p => p.id !== mainSpeaker.id);
+  const inviteUrl = meeting?.inviteUrl ?? "intellmeet.app/r/q2-sync";
+  const elapsedLabel = meeting?.status === "live" ? "Live" : meeting?.status === "scheduled" ? "Planifiee" : "Terminee";
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
@@ -39,15 +99,15 @@ const MeetingRoom = () => {
           <Logo size="sm" />
           <span className="hidden h-5 w-px bg-border sm:block" />
           <div className="hidden flex-col leading-tight sm:flex">
-            <span className="font-display text-sm font-semibold text-foreground">{t("meeting.title")}</span>
-            <span className="text-[11px] text-muted-foreground">{t("meeting.live")} · 12 {t("common.minutes")}</span>
+            <span className="font-display text-sm font-semibold text-foreground">{meeting?.title ?? t("meeting.title")}</span>
+            <span className="text-[11px] text-muted-foreground">{elapsedLabel} · {meeting?.durationMin ?? 12} {t("common.minutes")}</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="hidden gap-1.5 border-border bg-background sm:flex">
-            <Lock className="h-3 w-3" /> intellmeet.app/r/q2-sync
-            <button onClick={() => { navigator.clipboard?.writeText("intellmeet.app/r/q2-sync"); toast.success(t("meeting.linkCopied")); }} className="ml-1 text-muted-foreground hover:text-foreground">
+            <Lock className="h-3 w-3" /> {inviteUrl}
+            <button onClick={() => { navigator.clipboard?.writeText(inviteUrl); toast.success(t("meeting.linkCopied")); }} className="ml-1 text-muted-foreground hover:text-foreground">
               <Copy className="h-3 w-3" />
             </button>
           </Badge>
@@ -101,7 +161,15 @@ const MeetingRoom = () => {
             showSidebar ? "w-[340px]" : "w-0"
           )}
         >
-          {showSidebar && <MeetingSidebar />}
+          {showSidebar && (
+            <MeetingSidebar
+              meetingId={meeting?.id}
+              meeting={meeting}
+              summary={summary}
+              actionItems={actionItems}
+              transcript={transcript}
+            />
+          )}
         </div>
 
         {/* AI panel */}
@@ -111,7 +179,7 @@ const MeetingRoom = () => {
             showAI ? "w-[360px]" : "w-0"
           )}
         >
-          {showAI && <AIPanel />}
+          {showAI && <AIPanel summary={summary} actionItems={actionItems} suggestions={suggestions} />}
         </div>
       </div>
     </div>

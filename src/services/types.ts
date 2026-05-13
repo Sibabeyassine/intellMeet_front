@@ -197,9 +197,33 @@ export interface Notification {
   kind: "meeting" | "task" | "mention" | "ai";
 }
 
+// ---------- MEDIA ----------
+export interface MediaFile {
+  id: ID;
+  workspaceId: ID;
+  projectId?: ID;
+  meetingId?: ID;
+  originalName: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  createdAt: ISODate;
+}
+
 // ---------- AI ----------
 export interface AISuggestion {
   id: ID;
   text: string;
   kind: "summary" | "action" | "question" | "decision";
+}
+
+// ---------- DASHBOARD ----------
+export interface DashboardOverview {
+  workspacesCount: number;
+  projectsCount: number;
+  meetingsCount: number;
+  tasksCount: number;
+  completedTasksCount: number;
+  unreadNotificationsCount: number;
 }

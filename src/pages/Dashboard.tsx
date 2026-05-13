@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, CheckCircle2, Clock, FileText, Sparkles, TrendingUp, Users2, Video } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -17,6 +17,7 @@ import { useUser } from "@/store/auth";
 import { useUIStore } from "@/store/ui";
 import { useFormatters } from "@/i18n/hooks";
 import { isToday } from "date-fns";
+import { api, type DashboardOverview } from "@/services";
 
 const COLORS = ["221 83% 53%", "330 75% 55%", "152 70% 45%", "38 92% 55%", "265 70% 60%", "190 80% 45%"];
 
@@ -29,8 +30,18 @@ const Dashboard = () => {
   const tasks = useProjectsStore(s => s.tasks);
   const fetchTasks = useProjectsStore(s => s.fetch);
   const openModal = useUIStore(s => s.open);
+  const [overview, setOverview] = useState<DashboardOverview | null>(null);
 
   useEffect(() => { void fetchMeetings(); void fetchTasks(); }, [fetchMeetings, fetchTasks]);
+  useEffect(() => {
+    let alive = true;
+    void api.dashboard.overview().then((data) => {
+      if (alive) setOverview(data);
+    }).catch(() => {
+      if (alive) setOverview(null);
+    });
+    return () => { alive = false; };
+  }, []);
 
   const dayLabels = [t("dashboard.days.mon", "Lun"), t("dashboard.days.tue", "Mar"), t("dashboard.days.wed", "Mer"), t("dashboard.days.thu", "Jeu"), t("dashboard.days.fri", "Ven"), t("dashboard.days.sat", "Sam"), t("dashboard.days.sun", "Dim")];
 
@@ -68,10 +79,10 @@ const Dashboard = () => {
     })), [tasks]);
 
   const kpis = {
-    meetings: meetings.length,
-    actions: tasks.length,
-    done: tasks.filter(t => t.status === "done").length,
-    completion: tasks.length ? Math.round((tasks.filter(t => t.status === "done").length / tasks.length) * 100) : 0,
+    meetings: overview?.meetingsCount ?? meetings.length,
+    actions: overview?.tasksCount ?? tasks.length,
+    done: overview?.completedTasksCount ?? tasks.filter(t => t.status === "done").length,
+    completion: (overview?.tasksCount ?? tasks.length) ? Math.round(((overview?.completedTasksCount ?? tasks.filter(t => t.status === "done").length) / (overview?.tasksCount ?? tasks.length)) * 100) : 0,
   };
 
   const firstName = user?.fullName.split(" ")[0] ?? "";
@@ -197,7 +208,7 @@ const Dashboard = () => {
                       </div>
                       {m.live ? (
                         <Button asChild size="sm" variant="hero">
-                          <Link to="/meeting">{t("meeting.join")}</Link>
+                          <Link to={`/meeting/${m.id}`}>{t("meeting.join")}</Link>
                         </Button>
                       ) : (
                         <Button size="sm" variant="ghost" className="text-muted-foreground opacity-0 transition group-hover:opacity-100">
