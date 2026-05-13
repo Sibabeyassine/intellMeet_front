@@ -1,19 +1,19 @@
-import { useEffect, useRef, useState } from "react";
-import { Send, Smile, Paperclip } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   api,
   type ActionItem,
-  type ChatMessage,
   type ChatMessage as ApiChatMessage,
+  type ChatMessage,
   type Meeting,
   type MeetingSummary,
   type TranscriptLine
 } from "@/services";
+import { Paperclip, Send, Smile } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 interface Props {
@@ -76,11 +76,16 @@ export function MeetingSidebar({ meetingId, meeting, summary, actionItems = [], 
     setInput("");
 
     if (meetingId) {
-      const message = await api.chat.sendMessage({ channelId: meetingId, text });
-      setMessages((current) => {
-        if (current.some((item) => item.id === message.id)) return current;
-        return [...current, mapApiMessage(message)];
-      });
+      try {
+        const message = await api.chat.sendMessage({ channelId: meetingId, text });
+        setMessages((current) => {
+          if (current.some((item) => item.id === message.id)) return current;
+          return [...current, mapApiMessage(message)];
+        });
+      } catch (error) {
+        setInput(text);
+        toast.error(error instanceof Error ? error.message : "Message non envoyé");
+      }
       return;
     }
 
@@ -160,6 +165,7 @@ export function MeetingSidebar({ meetingId, meeting, summary, actionItems = [], 
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
+                title="Joindre un fichier"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void uploadFile(file);

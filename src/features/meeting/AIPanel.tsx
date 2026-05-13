@@ -1,9 +1,10 @@
-import { CheckCircle2, Circle, Clock, Sparkles, ArrowRight, Wand2, FileText, ListChecks } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { ActionItem, AISuggestion, MeetingSummary } from "@/services";
+import type { LucideIcon } from "lucide-react";
+import { ArrowRight, CheckCircle2, Circle, Clock, FileText, ListChecks, Sparkles, Wand2 } from "lucide-react";
 
 interface Props {
   onClose?: () => void;
@@ -144,7 +145,7 @@ export function AIPanel({ onClose, summary, actionItems = [], suggestions = [] }
   );
 }
 
-function Section({ icon: Icon, title, badge, children }: { icon: any; title: string; badge?: string; children: React.ReactNode }) {
+function Section({ icon: Icon, title, badge, children }: { icon: LucideIcon; title: string; badge?: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="mb-2.5 flex items-center justify-between">

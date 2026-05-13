@@ -24,6 +24,7 @@ const iconFor = (kind: Notification["kind"]) =>
 export function AppTopbar({ title, description, actions }: Props) {
   const openModal = useUIStore(s => s.open);
   const notifs = useNotificationsStore(s => s.list);
+  const markRead = useNotificationsStore(s => s.markRead);
   const markAllRead = useNotificationsStore(s => s.markAllRead);
   const unread = useUnreadCount();
   const { t } = useTranslation();
@@ -66,7 +67,7 @@ export function AppTopbar({ title, description, actions }: Props) {
           <PopoverContent align="end" className="w-[360px] p-0">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <p className="font-display text-sm font-semibold">{t("topbar.notifications")}</p>
-              <button onClick={() => markAllRead()} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+              <button onClick={() => void markAllRead()} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                 <Check className="h-3 w-3" /> {t("topbar.markAllRead")}
               </button>
             </div>
@@ -80,6 +81,9 @@ export function AppTopbar({ title, description, actions }: Props) {
                   <li key={n.id}>
                     <Link
                       to={n.href ?? "#"}
+                      onClick={() => {
+                        if (!n.read) void markRead(n.id);
+                      }}
                       className={cn(
                         "flex items-start gap-3 px-4 py-3 transition hover:bg-muted/40",
                         !n.read && "bg-primary/5"

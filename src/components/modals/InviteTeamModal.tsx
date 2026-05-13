@@ -11,26 +11,27 @@ import { api } from "@/services";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
-const inviteLink = "https://intellmeet.app/invite/wkspc-7f3d2a";
-
 export function InviteTeamModal() {
   const { t } = useTranslation();
   const open = useUIStore(s => s.modal === "invite");
   const close = useUIStore(s => s.close);
   const currentTeamId = useProjectsStore(s => s.currentTeamId);
   const teams = useProjectsStore(s => s.teams);
+  const fetchAll = useProjectsStore(s => s.fetchAll);
   const [loading, setLoading] = useState(false);
+  const teamId = currentTeamId ?? teams[0]?.id;
+  const inviteLink = teamId ? `${window.location.origin}/projects?workspaceId=${teamId}` : window.location.origin;
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const emails = String(fd.get("emails") ?? "").split(/[,\s]+/).filter(Boolean);
     if (!emails.length) { toast.error(t("modals.newChannel.errorRequired")); return; }
-    const teamId = currentTeamId ?? teams[0]?.id;
     if (!teamId) { toast.error("Cree un workspace avant d'inviter un membre"); return; }
     setLoading(true);
     try {
       await api.projects.inviteTeamMembers(teamId, emails);
+      await fetchAll();
       toast.success(t("modals.invite.sent"));
       close();
     } catch (error) {
@@ -44,7 +45,7 @@ export function InviteTeamModal() {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-display flex items-center gap-2">
             <UserPlus className="h-4 w-4 text-primary" /> {t("modals.invite.title")}
@@ -52,21 +53,21 @@ export function InviteTeamModal() {
           <DialogDescription>{t("modals.invite.description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="grid gap-1.5">
+        <div className="min-w-0 space-y-4">
+          <div className="grid min-w-0 gap-1.5">
             <Label>{t("modals.invite.linkLabel")}</Label>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
-              <span className="flex-1 truncate font-mono text-xs">{inviteLink}</span>
-              <Button type="button" variant="ghost" size="icon-sm" onClick={copy}><Copy className="h-3.5 w-3.5" /></Button>
+            <div className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">{inviteLink}</span>
+              <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" onClick={copy}><Copy className="h-3.5 w-3.5" /></Button>
             </div>
           </div>
 
-          <form onSubmit={submit} className="space-y-3">
-            <div className="grid gap-1.5">
+          <form onSubmit={submit} className="min-w-0 space-y-3">
+            <div className="grid min-w-0 gap-1.5">
               <Label htmlFor="emails" className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> {t("modals.invite.fieldEmails")}</Label>
-              <Textarea id="emails" name="emails" rows={3} placeholder="lea@team.com, marc@team.com…" />
+              <Textarea id="emails" name="emails" rows={3} className="max-w-full resize-none" placeholder="lea@team.com, marc@team.com…" />
             </div>
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-2">
               <Button type="button" variant="outline" onClick={close}>{t("common.cancel")}</Button>
               <Button type="submit" variant="hero" disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{t("modals.invite.send")}

@@ -10,6 +10,7 @@ import { useMeetingsStore } from "@/store/meetings";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { api } from "@/services";
 
 export function NewMeetingModal() {
   const { t } = useTranslation();
@@ -27,16 +28,36 @@ export function NewMeetingModal() {
     if (!title) { toast.error(t("modals.newMeeting.errorTitleRequired")); return; }
     setLoading(true);
     try {
+      const durationMin = Number(fd.get("duration") ?? 30);
+      const scheduledAt = startNow
+        ? new Date()
+        : new Date(String(fd.get("scheduledAt") ?? new Date().toISOString()));
+      const participantEmails = String(fd.get("emails") ?? "")
+        .split(/[,\n;]/)
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+      const invalidEmails = participantEmails.filter(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+
+      if (invalidEmails.length > 0) {
+        toast.error(`Email participant invalide : ${invalidEmails.join(", ")}`);
+        return;
+      }
+
       const meeting = await create({
         title,
         description: String(fd.get("description") ?? ""),
-        scheduledAt: new Date(String(fd.get("scheduledAt") ?? new Date().toISOString())).toISOString(),
-        durationMin: Number(fd.get("duration") ?? 30),
-        participantEmails: String(fd.get("emails") ?? "").split(",").map(s => s.trim()).filter(Boolean),
+        scheduledAt: scheduledAt.toISOString(),
+        durationMin,
+        participantEmails,
       });
+      if (startNow) {
+        await api.meetings.update(meeting.id, { status: "live" });
+      }
       toast.success(startNow ? t("modals.newMeeting.createdLive") : t("modals.newMeeting.createdScheduled"));
       close();
       navigate(startNow ? `/meeting/${meeting.id}` : "/meetings");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("auth.errors.generic"));
     } finally { setLoading(false); }
   };
 

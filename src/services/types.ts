@@ -43,6 +43,7 @@ export interface Participant {
   isCameraOn?: boolean;
   isSpeaking?: boolean;
   isScreenSharing?: boolean;
+  stream?: MediaStream;
 }
 
 export interface Meeting {

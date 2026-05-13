@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth, addMonths, subMonths } from "date-fns";
@@ -12,12 +12,15 @@ import { cn } from "@/lib/utils";
 import { useProjectsStore, useCurrentProject } from "@/store/projects";
 import { useUIStore } from "@/store/ui";
 import type { Task, TaskStatus } from "@/services";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 type ViewMode = "kanban" | "list" | "calendar";
 
 const Projects = () => {
   const { t, i18n } = useTranslation();
   const fetchAll = useProjectsStore(s => s.fetchAll);
+  const joinTeam = useProjectsStore(s => s.joinTeam);
   const teams = useProjectsStore(s => s.teams);
   const allProjects = useProjectsStore(s => s.projects);
   const allTasks = useProjectsStore(s => s.tasks);
@@ -36,12 +39,30 @@ const Projects = () => {
   );
   const move = useProjectsStore(s => s.move);
   const openModal = useUIStore(s => s.open);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const handledInviteRef = useRef<string | null>(null);
 
   const [view, setView] = useState<ViewMode>("kanban");
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    const workspaceId = searchParams.get("workspaceId");
+    if (!workspaceId || handledInviteRef.current === workspaceId) return;
+    handledInviteRef.current = workspaceId;
+
+    void joinTeam(workspaceId)
+      .then((team) => {
+        toast.success(`Vous avez rejoint ${team.name}`);
+        setSearchParams({}, { replace: true });
+      })
+      .catch((error) => {
+        handledInviteRef.current = null;
+        toast.error(error instanceof Error ? error.message : "Lien d'invitation invalide");
+      });
+  }, [joinTeam, searchParams, setSearchParams]);
 
   const columns: { id: TaskStatus; label: string }[] = [
     { id: "backlog", label: t("projects.backlog") },

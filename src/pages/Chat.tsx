@@ -21,9 +21,21 @@ const Chat = () => {
   const setActive = useChatStore(s => s.setActive);
   const send = useChatStore(s => s.send);
   const fetchAll = useChatStore(s => s.fetchAll);
+  const refreshActive = useChatStore(s => s.refreshActive);
+  const disconnectChat = useChatStore(s => s.disconnect);
   const openModal = useUIStore(s => s.open);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refreshActive();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(interval);
+      disconnectChat();
+    };
+  }, [disconnectChat, refreshActive]);
 
   const active = [...channelsLive, ...dmsLive].find(c => c.id === activeId) ?? channelsLive[0] ?? dmsLive[0];
   const messages = active ? (messagesMap[active.id] ?? []) as ChatMessage[] : [];

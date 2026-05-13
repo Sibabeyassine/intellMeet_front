@@ -8,12 +8,30 @@ import { useNotificationsStore } from "@/store/notifications";
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hydrate = useAuthStore(s => s.hydrate);
+  const clearSession = useAuthStore(s => s.clearSession);
   const initialized = useAuthStore(s => s.initialized);
   const session = useAuthStore(s => s.session);
   const fetchNotifs = useNotificationsStore(s => s.fetch);
+  const clearNotifs = useNotificationsStore(s => s.clear);
 
   useEffect(() => { void hydrate(); }, [hydrate]);
-  useEffect(() => { if (session) void fetchNotifs(); }, [session, fetchNotifs]);
+  useEffect(() => {
+    window.addEventListener("intellmeet:session-expired", clearSession);
+    return () => window.removeEventListener("intellmeet:session-expired", clearSession);
+  }, [clearSession]);
+  useEffect(() => {
+    if (!session) {
+      clearNotifs();
+      return;
+    }
+
+    void fetchNotifs();
+    const interval = window.setInterval(() => {
+      void fetchNotifs();
+    }, 30000);
+
+    return () => window.clearInterval(interval);
+  }, [session, fetchNotifs, clearNotifs]);
 
   if (!initialized) {
     return (

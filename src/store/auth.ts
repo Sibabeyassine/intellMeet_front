@@ -13,6 +13,8 @@ interface AuthState {
   resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (patch: Partial<Pick<User, "fullName" | "avatarUrl">>) => Promise<void>;
+  changePassword: (p: { currentPassword: string; newPassword: string }) => Promise<void>;
+  clearSession: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -59,6 +61,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await api.auth.updateProfile(patch);
     const s = get().session;
     if (s) set({ session: { ...s, user } });
+  },
+  async changePassword(p) {
+    await api.auth.changePassword(p);
+  },
+  clearSession() {
+    set({ session: null });
   },
 }));
 

@@ -28,6 +28,7 @@ const Dashboard = () => {
   const meetings = useMeetingsStore(s => s.list);
   const fetchMeetings = useMeetingsStore(s => s.fetch);
   const tasks = useProjectsStore(s => s.tasks);
+  const projects = useProjectsStore(s => s.projects);
   const fetchTasks = useProjectsStore(s => s.fetch);
   const openModal = useUIStore(s => s.open);
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
@@ -45,13 +46,29 @@ const Dashboard = () => {
 
   const dayLabels = [t("dashboard.days.mon", "Lun"), t("dashboard.days.tue", "Mar"), t("dashboard.days.wed", "Mer"), t("dashboard.days.thu", "Jeu"), t("dashboard.days.fri", "Ven"), t("dashboard.days.sat", "Sam"), t("dashboard.days.sun", "Dim")];
 
-  const chartData = dayLabels.map((day, i) => ({ day, meetings: [4,6,3,8,5,1,0][i], hours: [3.2,4.5,2.1,5.6,3.8,0.5,0][i] }));
-  const productivityData = dayLabels.map((day, i) => ({ day, actions: [12,18,9,24,16,4,2][i] }));
+  const weekdayIndex = (date: Date) => (date.getDay() + 6) % 7;
+  const chartData = dayLabels.map((day, i) => {
+    const dayMeetings = meetings.filter((meeting) => weekdayIndex(new Date(meeting.scheduledAt)) === i);
+    return {
+      day,
+      meetings: dayMeetings.length,
+      hours: Number((dayMeetings.reduce((sum, meeting) => sum + meeting.durationMin, 0) / 60).toFixed(1))
+    };
+  });
+  const productivityData = dayLabels.map((day, i) => ({
+    day,
+    actions: tasks.filter((task) => {
+      const sourceDate = task.dueDate ?? task.createdAt;
+      return sourceDate && weekdayIndex(new Date(sourceDate)) === i;
+    }).length
+  }));
+  const totalMeetingHours = meetings.reduce((sum, meeting) => sum + meeting.durationMin, 0) / 60;
+  const liveMeetings = meetings.filter((meeting) => meeting.status === "live").length;
 
   const recentSummaries = meetings.slice(0, 3).map((m, i) => ({
     title: m.title,
     time: fmt(m.scheduledAt, "EEE d · HH:mm"),
-    actions: 3 + i,
+    actions: tasks.filter((task) => task.fromAI || task.tag?.label === m.title).length,
     color: COLORS[i % COLORS.length],
   }));
 
@@ -69,7 +86,8 @@ const Dashboard = () => {
     })), [meetings, fmt, t]);
 
   const aiTasks = useMemo(() => tasks
-    .filter(t => t.fromAI && t.status !== "done")
+    .filter(t => t.status !== "done")
+    .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority))
     .slice(0, 5)
     .map(task => ({
       title: task.title,
@@ -77,6 +95,16 @@ const Dashboard = () => {
       due: task.due ?? "—",
       priority: task.priority,
     })), [tasks]);
+
+  const teamGoals = useMemo(() => projects.slice(0, 3).map((project) => {
+    const projectTasks = tasks.filter((task) => task.projectId === project.id);
+    const doneTasks = projectTasks.filter((task) => task.status === "done").length;
+    return {
+      id: project.id,
+      name: project.name,
+      value: projectTasks.length ? Math.round((doneTasks / projectTasks.length) * 100) : 0
+    };
+  }), [projects, tasks]);
 
   const kpis = {
     meetings: overview?.meetingsCount ?? meetings.length,
@@ -103,10 +131,10 @@ const Dashboard = () => {
         <div className="mx-auto max-w-[1400px] space-y-6 p-6">
           {/* KPIs */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard label={t("dashboard.kpiMeetings")} value={String(kpis.meetings)} trend="+12%" icon={Video} color="221 83% 53%" />
-            <KpiCard label={t("dashboard.kpiHours")} value="14h" trend="+34%" icon={Sparkles} color="265 70% 60%" />
-            <KpiCard label={t("dashboard.kpiTasks")} value={String(kpis.actions)} trend="+8%" icon={CheckCircle2} color="152 70% 45%" />
-            <KpiCard label={t("dashboard.kpiCompletion")} value={`${kpis.completion}%`} trend="+5%" icon={TrendingUp} color="38 92% 55%" />
+            <KpiCard label={t("dashboard.kpiMeetings")} value={String(kpis.meetings)} trend={`${liveMeetings} live`} icon={Video} color="221 83% 53%" />
+            <KpiCard label={t("dashboard.kpiHours")} value={`${totalMeetingHours.toFixed(1)}h`} trend={`${meetings.length} total`} icon={Sparkles} color="265 70% 60%" />
+            <KpiCard label={t("dashboard.kpiTasks")} value={String(kpis.actions)} trend={`${kpis.done} done`} icon={CheckCircle2} color="152 70% 45%" />
+            <KpiCard label={t("dashboard.kpiCompletion")} value={`${kpis.completion}%`} trend={`${projects.length} projets`} icon={TrendingUp} color="38 92% 55%" />
           </div>
 
           {/* Charts row */}
@@ -119,7 +147,7 @@ const Dashboard = () => {
                   <p className="text-xs text-muted-foreground">{t("dashboard.activitySub")}</p>
                 </div>
                 <Badge variant="outline" className="gap-1.5 border-success/30 bg-success/10 text-success">
-                  <TrendingUp className="h-3 w-3" /> +18%
+                  <TrendingUp className="h-3 w-3" /> API
                 </Badge>
               </div>
               <div className="h-[240px] w-full">
@@ -291,19 +319,17 @@ const Dashboard = () => {
                 <Badge variant="secondary">Q2</Badge>
               </div>
               <div className="space-y-4">
-                {[
-                  { name: "Lancer onboarding v2", value: 78, color: "primary" },
-                  { name: "Atteindre 50 clients beta", value: 64, color: "success" },
-                  { name: "Documentation API publique", value: 35, color: "warning" },
-                ].map((g, i) => (
-                  <div key={i}>
+                {teamGoals.length ? teamGoals.map((g) => (
+                  <div key={g.id}>
                     <div className="mb-1.5 flex items-center justify-between text-sm">
                       <span className="font-medium text-foreground">{g.name}</span>
                       <span className="font-semibold tabular-nums text-muted-foreground">{g.value}%</span>
                     </div>
                     <Progress value={g.value} className="h-2" />
                   </div>
-                ))}
+                )) : (
+                  <p className="text-sm text-muted-foreground">{t("common.empty")}</p>
+                )}
               </div>
             </Card>
           </div>
@@ -339,3 +365,7 @@ function KpiCard({ label, value, trend, icon: Icon, color }: any) {
 import { cn } from "@/lib/utils";
 
 export default Dashboard;
+
+function priorityRank(priority: "low" | "med" | "high") {
+  return priority === "high" ? 3 : priority === "med" ? 2 : 1;
+}

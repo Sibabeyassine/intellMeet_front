@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance } from "axios";
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
 import { io, Socket } from "socket.io-client";
 
 import type {
@@ -76,6 +76,7 @@ type BackendProject = {
 type BackendTask = {
   id: string;
   projectId?: string;
+  assigneeId?: string;
   title: string;
   description?: string;
   status: "todo" | "doing" | "done" | "cancelled";
@@ -145,17 +146,50 @@ const client: AxiosInstance = axios.create({
   }
 });
 
+const refreshClient: AxiosInstance = axios.create({
+  baseURL: API_URL,
+  headers: {
+    "Content-Type": "application/json"
+  }
+});
+
+type RetriableRequestConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+
 client.interceptors.request.use((config) => {
   const session = readSession();
   if (session?.accessToken) {
     config.headers.Authorization = `Bearer ${session.accessToken}`;
+  }
+  if (config.method?.toLowerCase() === "get") {
+    config.headers["Cache-Control"] = "no-cache";
+    config.headers.Pragma = "no-cache";
   }
   return config;
 });
 
 client.interceptors.response.use(
   (response) => response,
-  (error: AxiosError<ApiResponse<unknown>>) => {
+  async (error: AxiosError<ApiResponse<unknown>>) => {
+    const originalRequest = error.config as RetriableRequestConfig | undefined;
+    const isUnauthorized = error.response?.status === 401;
+    const canRefresh =
+      isUnauthorized &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !originalRequest.url?.includes("/auth/login") &&
+      !originalRequest.url?.includes("/auth/register") &&
+      !originalRequest.url?.includes("/auth/refresh");
+
+    if (canRefresh) {
+      originalRequest._retry = true;
+      const refreshed = await refreshSession();
+      if (refreshed) {
+        originalRequest.headers.Authorization = `Bearer ${refreshed.accessToken}`;
+        return client(originalRequest);
+      }
+      notifySessionExpired();
+    }
+
     const message =
       error.response?.data?.message ?? error.message ?? "API request failed";
     return Promise.reject(new Error(message));
@@ -181,6 +215,53 @@ const saveSession = (session: Session | null) => {
   } else {
     localStorage.removeItem(SESSION_KEY);
   }
+};
+
+const notifySessionExpired = () => {
+  saveSession(null);
+  window.dispatchEvent(new CustomEvent("intellmeet:session-expired"));
+};
+
+const refreshSession = async (): Promise<Session | null> => {
+  const session = readSession();
+  if (!session?.refreshToken) return null;
+
+  try {
+    const data = await unwrap<{
+      tokens: { accessToken: string; refreshToken: string };
+    }>(
+      refreshClient.post("/auth/refresh", {
+        refreshToken: session.refreshToken
+      })
+    );
+
+    const nextSession: Session = {
+      ...session,
+      accessToken: data.tokens.accessToken,
+      refreshToken: data.tokens.refreshToken,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    };
+    saveSession(nextSession);
+    return nextSession;
+  } catch {
+    saveSession(null);
+    return null;
+  }
+};
+
+const getValidSession = async (): Promise<Session | null> => {
+  const session = readSession();
+  if (!session) return null;
+
+  if (session.refreshToken) {
+    return refreshSession();
+  }
+
+  const expiresAt = new Date(session.expiresAt).getTime();
+  const shouldRefresh = !Number.isFinite(expiresAt) || expiresAt - Date.now() < 60 * 1000;
+  if (!shouldRefresh) return session;
+
+  return refreshSession();
 };
 
 const initialsFor = (name: string) =>
@@ -263,7 +344,9 @@ const mapTask = (task: BackendTask): Task => ({
   description: task.description,
   status: mapTaskStatus(task.status),
   priority: mapTaskPriority(task.priority),
-  assignees: [],
+  assignees: task.assigneeId
+    ? [{ initials: "MB", color: colorFor(task.assigneeId) }]
+    : [],
   dueDate: task.dueDate,
   createdAt: task.createdAt,
   updatedAt: task.updatedAt
@@ -297,27 +380,41 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => ({
       initials: "HO",
       color: colorFor(meeting.hostId),
       isHost: true
-    }
+    },
+    ...(meeting.participantIds ?? [])
+      .filter((participantId) => participantId !== meeting.hostId)
+      .map((participantId, index) => ({
+        id: participantId,
+        name: `Participant ${index + 1}`,
+        initials: `P${index + 1}`,
+        color: colorFor(participantId)
+      }))
   ],
   inviteUrl: `/meeting/${meeting.id}`,
   recordingUrl: meeting.recordingUrl,
   hasAISummary: Boolean(meeting.summary)
 });
 
-const mapNotification = (notification: BackendNotification): Notification => ({
-  id: notification.id,
-  title: notification.title,
-  body: notification.message,
-  href: notification.data?.taskId ? "/projects" : "/meetings",
-  read: Boolean(notification.readAt),
-  createdAt: notification.createdAt,
-  kind:
-    notification.type === "task_assigned"
-      ? "task"
-      : notification.type === "system"
-        ? "ai"
-        : "meeting"
-});
+const mapNotification = (notification: BackendNotification): Notification => {
+  const data = notification.data ?? {};
+  const meetingId = typeof data.meetingId === "string" ? data.meetingId : undefined;
+  const workspaceId = typeof data.workspaceId === "string" ? data.workspaceId : undefined;
+
+  return {
+    id: notification.id,
+    title: notification.title,
+    body: notification.message,
+    href: meetingId ? `/meeting/${meetingId}` : workspaceId ? "/projects" : "/dashboard",
+    read: Boolean(notification.readAt),
+    createdAt: notification.createdAt,
+    kind:
+      notification.type === "task_assigned"
+        ? "task"
+        : notification.type === "system"
+          ? "ai"
+          : "meeting"
+  };
+};
 
 const mapMediaFile = (file: BackendMediaFile): MediaFile => ({
   id: file.id,
@@ -351,6 +448,17 @@ const ensureWorkspaceId = async () => {
 
   setActiveWorkspaceId(workspaces[0].id);
   return workspaces[0].id;
+};
+
+const createDefaultWorkspaceId = async () => {
+  const workspace = await unwrap<BackendWorkspace>(
+    client.post("/workspaces", {
+      name: "Espace IntellMeet",
+      description: "Espace cree automatiquement depuis le frontend"
+    })
+  );
+  setActiveWorkspaceId(workspace.id);
+  return workspace.id;
 };
 
 const auth: AuthAPI = {
@@ -388,12 +496,17 @@ const auth: AuthAPI = {
   async logout() {
     const session = readSession();
     if (session?.refreshToken) {
-      await client.post("/auth/logout", { refreshToken: session.refreshToken });
+      try {
+        await client.post("/auth/logout", { refreshToken: session.refreshToken });
+      } catch {
+        // The local session still has to be removed even if the access token
+        // is already expired or revoked on the backend.
+      }
     }
     saveSession(null);
   },
   async getSession() {
-    return readSession();
+    return getValidSession();
   },
   async updateProfile(patch) {
     const user = await unwrap<BackendUser>(
@@ -408,13 +521,22 @@ const auth: AuthAPI = {
       saveSession(nextSession);
     }
     return mapUser(user);
+  },
+  async changePassword(payload) {
+    await client.post("/auth/change-password", payload);
   }
 };
 
 const projects: ProjectsAPI = {
   async listTeams() {
     const workspaces = await unwrap<BackendWorkspace[]>(client.get("/workspaces"));
-    if (workspaces[0]) setActiveWorkspaceId(workspaces[0].id);
+    const currentWorkspaceId = activeWorkspaceId();
+    if (
+      workspaces[0] &&
+      (!currentWorkspaceId || !workspaces.some((workspace) => workspace.id === currentWorkspaceId))
+    ) {
+      setActiveWorkspaceId(workspaces[0].id);
+    }
     return workspaces.map(mapTeam);
   },
   async createTeam(payload: CreateTeamPayload) {
@@ -423,6 +545,13 @@ const projects: ProjectsAPI = {
         name: payload.name,
         description: "Created from IntellMeet frontend"
       })
+    );
+    setActiveWorkspaceId(workspace.id);
+    return mapTeam(workspace);
+  },
+  async joinTeam(teamId) {
+    const workspace = await unwrap<BackendWorkspace>(
+      client.post(`/workspaces/${teamId}/join`)
     );
     setActiveWorkspaceId(workspace.id);
     return mapTeam(workspace);
@@ -437,16 +566,21 @@ const projects: ProjectsAPI = {
       )
     );
   },
-  async listProjects() {
-    const workspaceId = await ensureWorkspaceId();
+  async listProjects(teamId) {
+    const workspaceId = teamId ?? await ensureWorkspaceId();
     if (!workspaceId) return [];
+    if (teamId) setActiveWorkspaceId(teamId);
     const list = await unwrap<BackendProject[]>(
       client.get("/projects", { params: { workspaceId } })
     );
-    if (list[0]) setActiveProjectId(list[0].id);
+    const currentProjectId = activeProjectId();
+    if (list[0] && !list.some((project) => project.id === currentProjectId)) {
+      setActiveProjectId(list[0].id);
+    }
     return list.map(mapProject);
   },
   async createProject(payload: CreateProjectPayload) {
+    setActiveWorkspaceId(payload.teamId);
     const project = await unwrap<BackendProject>(
       client.post("/projects", {
         workspaceId: payload.teamId,
@@ -458,9 +592,10 @@ const projects: ProjectsAPI = {
     setActiveProjectId(project.id);
     return mapProject(project);
   },
-  async listTasks(projectId?: ID) {
-    const workspaceId = await ensureWorkspaceId();
+  async listTasks(projectId?: ID, teamId?: ID) {
+    const workspaceId = teamId ?? await ensureWorkspaceId();
     if (!workspaceId) return [];
+    if (teamId) setActiveWorkspaceId(teamId);
     const tasks = await unwrap<BackendTask[]>(
       client.get("/tasks", {
         params: {
@@ -524,9 +659,13 @@ const meetings: MeetingsAPI = {
     const meeting = await unwrap<BackendMeeting>(client.get(`/meetings/${id}`));
     return mapMeeting(meeting);
   },
+  async join(id) {
+    const meeting = await unwrap<BackendMeeting>(client.post(`/meetings/${id}/join`));
+    setActiveMeetingId(meeting.id);
+    return mapMeeting(meeting);
+  },
   async create(payload: CreateMeetingPayload) {
-    const workspaceId = await ensureWorkspaceId();
-    if (!workspaceId) throw new Error("Aucun workspace actif");
+    const workspaceId = (await ensureWorkspaceId()) ?? await createDefaultWorkspaceId();
     const startsAt = payload.scheduledAt;
     const endsAt = new Date(
       new Date(startsAt).getTime() + payload.durationMin * 60000
@@ -534,12 +673,11 @@ const meetings: MeetingsAPI = {
     const meeting = await unwrap<BackendMeeting>(
       client.post("/meetings", {
         workspaceId,
-        projectId: activeProjectId() ?? undefined,
         title: payload.title,
         description: payload.description,
         startsAt,
         endsAt,
-        participantIds: []
+        participantEmails: payload.participantEmails ?? []
       })
     );
     setActiveMeetingId(meeting.id);
@@ -611,27 +749,31 @@ const meetings: MeetingsAPI = {
 
 const chat: ChatAPI = {
   async listChannels() {
-    let meetingId = activeMeetingId();
-    if (!meetingId) {
-      const meetingsList = await meetings.list();
-      meetingId = meetingsList[0]?.id ?? null;
-    }
-    if (!meetingId) return [];
-    const channel: Channel = {
-      id: meetingId,
-      name: "meeting-chat",
+    const meetingsList = await meetings.list();
+    return meetingsList.map((meeting): Channel => ({
+      id: meeting.id,
+      name: meeting.title,
       kind: "channel",
-      topic: "Chat de reunion"
-    };
-    return [channel];
+      topic: meeting.status === "live" ? "Réunion en direct" : "Chat de réunion",
+      unread: 0
+    }));
   },
   async listDMs() {
     return [];
   },
   async listMessages(channelId) {
-    const messages = await unwrap<BackendChatMessage[]>(
-      client.get(`/chat/meetings/${channelId}/messages`, { params: { limit: 50 } })
-    );
+    let messages: BackendChatMessage[] = [];
+    try {
+      messages = await unwrap<BackendChatMessage[]>(
+        client.get(`/chat/meetings/${channelId}/messages`, { params: { limit: 50 } })
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Meeting not found")) {
+        if (activeMeetingId() === channelId) localStorage.removeItem(ACTIVE_MEETING_KEY);
+        return [];
+      }
+      throw error;
+    }
     return messages.reverse().map((message): ChatMessage => ({
       id: message.id,
       channelId: message.meetingId,
@@ -648,11 +790,19 @@ const chat: ChatAPI = {
     }));
   },
   async sendMessage(payload: SendMessagePayload) {
-    const message = await unwrap<BackendChatMessage>(
-      client.post(`/chat/meetings/${payload.channelId}/messages`, {
-        message: payload.text
-      })
-    );
+    let message: BackendChatMessage;
+    try {
+      message = await unwrap<BackendChatMessage>(
+        client.post(`/chat/meetings/${payload.channelId}/messages`, {
+          message: payload.text
+        })
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Meeting not found")) {
+        if (activeMeetingId() === payload.channelId) localStorage.removeItem(ACTIVE_MEETING_KEY);
+      }
+      throw error;
+    }
     return {
       id: message.id,
       channelId: message.meetingId,
@@ -730,8 +880,19 @@ const notifications: NotificationsAPI = {
     const data = await unwrap<{
       notifications: BackendNotification[];
       unreadCount: number;
-    }>(client.get("/notifications"));
+    }>(
+      client.get("/notifications", {
+        params: { limit: 50 },
+        headers: { "Cache-Control": "no-cache" }
+      })
+    );
     return data.notifications.map(mapNotification);
+  },
+  async markRead(id) {
+    const notification = await unwrap<BackendNotification>(
+      client.patch(`/notifications/${id}/read`)
+    );
+    return mapNotification(notification);
   },
   async markAllRead() {
     await client.patch("/notifications/read-all");
@@ -776,11 +937,8 @@ const media: MediaAPI = {
 const ai: AIAPI = {
   async generateSuggestions(meetingId) {
     const meeting = await unwrap<BackendMeeting>(client.get(`/meetings/${meetingId}`));
-    const transcript =
-      meeting.transcript ??
-      meeting.summary ??
-      meeting.description ??
-      meeting.title;
+    const transcript = meeting.transcript ?? meeting.summary ?? meeting.description;
+    if (!transcript || transcript.trim().length < 10) return [];
     const data = await unwrap<{
       intelligence: { summary: string; actionItems: Array<{ title: string }> };
     }>(

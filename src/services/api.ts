@@ -39,11 +39,13 @@ export interface AuthAPI {
   logout(): Promise<void>;
   getSession(): Promise<Session | null>;
   updateProfile(patch: Partial<Pick<User, "fullName" | "avatarUrl">>): Promise<User>;
+  changePassword(p: { currentPassword: string; newPassword: string }): Promise<void>;
 }
 
 export interface MeetingsAPI {
   list(): Promise<Meeting[]>;
   get(id: ID): Promise<Meeting | null>;
+  join(id: ID): Promise<Meeting>;
   create(p: CreateMeetingPayload): Promise<Meeting>;
   update(id: ID, patch: Partial<Meeting>): Promise<Meeting>;
   delete(id: ID): Promise<void>;
@@ -57,10 +59,11 @@ export interface MeetingsAPI {
 export interface ProjectsAPI {
   listTeams(): Promise<Team[]>;
   createTeam(p: CreateTeamPayload): Promise<Team>;
+  joinTeam(teamId: ID): Promise<Team>;
   inviteTeamMembers(teamId: ID, emails: string[]): Promise<void>;
-  listProjects(): Promise<Project[]>;
+  listProjects(teamId?: ID): Promise<Project[]>;
   createProject(p: CreateProjectPayload): Promise<Project>;
-  listTasks(projectId?: ID): Promise<Task[]>;
+  listTasks(projectId?: ID, teamId?: ID): Promise<Task[]>;
   createTask(p: CreateTaskPayload): Promise<Task>;
   updateTaskStatus(id: ID, status: TaskStatus): Promise<Task>;
   updateTask(id: ID, patch: Partial<Task>): Promise<Task>;
@@ -78,6 +81,7 @@ export interface ChatAPI {
 
 export interface NotificationsAPI {
   list(): Promise<Notification[]>;
+  markRead(id: ID): Promise<Notification>;
   markAllRead(): Promise<void>;
 }
 

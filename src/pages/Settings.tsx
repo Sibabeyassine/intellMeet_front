@@ -6,11 +6,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useTheme } from "@/components/ThemeProvider";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
-import { useAuthStore } from "@/store/auth";
+import { useAuthStore, useUser } from "@/store/auth";
 import { Bell, Lock, Palette, CreditCard, SlidersHorizontal, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
@@ -19,10 +21,38 @@ const Settings = () => {
   const { t, i18n } = useTranslation();
   const { theme, setTheme } = useTheme();
   const logout = useAuthStore(s => s.logout);
+  const changePassword = useAuthStore(s => s.changePassword);
+  const user = useUser();
   const navigate = useNavigate();
   const [prefs, setPrefs] = useState({ email: true, push: true, mentions: true, ai: true });
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
 
   const save = () => toast.success(t("settings.saved"));
+  const submitPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const currentPassword = String(form.get("currentPassword") ?? "");
+    const newPassword = String(form.get("newPassword") ?? "");
+    const confirmPassword = String(form.get("confirmPassword") ?? "");
+
+    if (newPassword !== confirmPassword) {
+      toast.error("Les mots de passe ne correspondent pas");
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      await changePassword({ currentPassword, newPassword });
+      toast.success("Mot de passe mis à jour");
+      setPasswordOpen(false);
+      event.currentTarget.reset();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Impossible de changer le mot de passe");
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
 
   return (
     <AppShell>
@@ -119,7 +149,7 @@ const Settings = () => {
                   <Label className="text-sm font-semibold">{t("settings.security.password")}</Label>
                   <p className="mt-0.5 text-xs text-muted-foreground">••••••••</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => toast(t("common.comingSoon"))}>{t("settings.security.changePassword")}</Button>
+                <Button variant="outline" size="sm" onClick={() => setPasswordOpen(true)}>{t("settings.security.changePassword")}</Button>
               </Card>
               <Card className="flex items-center justify-between p-5">
                 <div>
@@ -144,16 +174,42 @@ const Settings = () => {
                 <div className="flex items-start justify-between">
                   <div>
                     <Label className="text-sm font-semibold">{t("settings.billing.currentPlan")}</Label>
-                    <p className="mt-1 font-display text-2xl font-bold text-foreground">Pro</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">€12 / {t("landing.pricing.perUser")}</p>
+                    <p className="mt-1 font-display text-2xl font-bold text-foreground">{user?.role === "admin" ? "Admin" : "Workspace"}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Plan local synchronisé avec ton rôle backend</p>
                   </div>
-                  <Button variant="hero" onClick={() => toast(t("common.comingSoon"))}>{t("settings.billing.upgrade")}</Button>
+                  <Button variant="hero" disabled>{t("settings.billing.upgrade")}</Button>
                 </div>
               </Card>
             </TabsContent>
           </Tabs>
         </div>
       </div>
+      <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("settings.security.changePassword")}</DialogTitle>
+            <DialogDescription>Cette action appelle directement l'API sécurisée du backend.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitPassword} className="space-y-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="currentPassword">Mot de passe actuel</Label>
+              <Input id="currentPassword" name="currentPassword" type="password" minLength={8} required />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="newPassword">Nouveau mot de passe</Label>
+              <Input id="newPassword" name="newPassword" type="password" minLength={8} required />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="confirmPassword">Confirmer le nouveau mot de passe</Label>
+              <Input id="confirmPassword" name="confirmPassword" type="password" minLength={8} required />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setPasswordOpen(false)}>Annuler</Button>
+              <Button type="submit" disabled={passwordLoading}>{passwordLoading ? "Mise à jour..." : "Mettre à jour"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 };

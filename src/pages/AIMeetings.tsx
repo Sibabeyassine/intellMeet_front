@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Calendar, CheckCircle2, Circle, Clock, Download, FileText, Filter, ListChecks,
@@ -84,10 +84,14 @@ const AIMeetings = () => {
   const fetchMeetings = useMeetingsStore(s => s.fetch);
   const removeMeeting = useMeetingsStore(s => s.remove);
   const [detailsById, setDetailsById] = useState<Record<string, MeetingDetails>>({});
-  const meetings = apiMeetings.map((meeting, index) => mapApiMeeting(meeting, index, detailsById[meeting.id]));
+  const meetings = useMemo(
+    () => apiMeetings.map((meeting, index) => mapApiMeeting(meeting, index, detailsById[meeting.id])),
+    [apiMeetings, detailsById]
+  );
   const [selectedId, setSelectedId] = useState(meetings[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const selected = meetings.find(m => m.id === selectedId) ?? meetings[0];
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
@@ -125,6 +129,57 @@ const AIMeetings = () => {
     void removeMeeting(selected.id);
     toast.success(t("meetings.deleted"));
     setConfirmDel(false);
+  };
+
+  const handleAnalyze = async () => {
+    if (!selected || analyzing) return;
+    setAnalyzing(true);
+    try {
+      const suggestions = await api.ai.generateSuggestions(selected.id);
+      await fetchMeetings();
+      setDetailsById(current => {
+        const next = { ...current };
+        delete next[selected.id];
+        return next;
+      });
+      if (suggestions.length) {
+        toast.success("Analyse IA générée");
+      } else {
+        toast.error("Ajoute un transcript, une description ou un résumé avant de lancer l'analyse IA.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Analyse IA impossible");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (!selected) return;
+    const content = [
+      selected.title,
+      `${selected.date} · ${selected.duration}`,
+      "",
+      "Résumé",
+      selected.summary,
+      "",
+      "Points clés",
+      ...(selected.highlights.length ? selected.highlights.map((item) => `- ${item}`) : ["- Aucun"]),
+      "",
+      "Décisions",
+      ...(selected.decisions.length ? selected.decisions.map((item) => `- ${item}`) : ["- Aucune"]),
+      "",
+      "Actions",
+      ...(selected.actions.length ? selected.actions.map((item) => `- ${item.title} (${item.assignee})`) : ["- Aucune"])
+    ].join("\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${selected.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-resume.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("meetings.exported"));
   };
 
   if (!selected) {
@@ -223,10 +278,13 @@ const AIMeetings = () => {
                 <span className="flex items-center gap-1.5"><Users2 className="h-4 w-4" />{selected.participants} {t("common.participants")}</span>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="hero" size="sm" className="gap-2" onClick={() => toast.success(t("meetings.exported"))}>
+                <Button variant="hero" size="sm" className="gap-2" onClick={handleExport}>
                   <Download className="h-4 w-4" /> {t("meetings.exportPdf")}
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard?.writeText(window.location.href); toast(t("meetings.linkCopied")); }}>
+                <Button variant="outline" size="sm" className="gap-2" onClick={handleAnalyze} disabled={analyzing}>
+                  <Sparkles className="h-4 w-4" /> {analyzing ? "Analyse..." : "Analyser IA"}
+                </Button>
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/meeting/${selected.id}`); toast(t("meetings.linkCopied")); }}>
                   <Share2 className="h-4 w-4" /> {t("meetings.share")}
                 </Button>
                 <Button asChild variant="ghost" size="sm" className="gap-2 text-muted-foreground">

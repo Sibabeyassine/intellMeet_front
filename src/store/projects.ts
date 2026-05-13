@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/services";
+import { useNotificationsStore } from "@/store/notifications";
 import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team } from "@/services";
 
 interface ProjectsState {
@@ -19,6 +20,7 @@ interface ProjectsState {
   setTeam: (id: string | null) => void;
   setProject: (id: string | null) => void;
   createTeam: (p: CreateTeamPayload) => Promise<Team>;
+  joinTeam: (id: string) => Promise<Team>;
   createProject: (p: CreateProjectPayload) => Promise<Project>;
   create: (p: CreateTaskPayload) => Promise<Task>;
   move: (id: string, status: TaskStatus) => Promise<void>;
@@ -35,15 +37,17 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     if (get().loading) return;
     set({ loading: true });
     try {
-      const [teams, projects, tasks] = await Promise.all([
-        api.projects.listTeams(),
-        api.projects.listProjects(),
-        api.projects.listTasks(),
-      ]);
+      const teams = await api.projects.listTeams();
       const state = get();
       const teamId = state.currentTeamId && teams.some(t => t.id === state.currentTeamId)
         ? state.currentTeamId
         : teams[0]?.id ?? null;
+      const [projects, tasks] = teamId
+        ? await Promise.all([
+            api.projects.listProjects(teamId),
+            api.projects.listTasks(undefined, teamId),
+          ])
+        : [[], []];
       const teamProjects = projects.filter(p => p.teamId === teamId);
       const projectId = state.currentProjectId && teamProjects.some(p => p.id === state.currentProjectId)
         ? state.currentProjectId
@@ -54,14 +58,78 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
   fetch() { return get().fetchAll(); },
 
   setTeam(id) {
-    const projects = get().projects.filter(p => p.teamId === id);
-    set({ currentTeamId: id, currentProjectId: projects[0]?.id ?? null });
+    set({
+      currentTeamId: id,
+      currentProjectId: null,
+      projects: [],
+      tasks: [],
+      loading: true
+    });
+
+    void (async () => {
+      try {
+        if (!id) {
+          set({ loading: false });
+          return;
+        }
+
+        const [projects, tasks] = await Promise.all([
+          api.projects.listProjects(id),
+          api.projects.listTasks(undefined, id),
+        ]);
+        set({
+          projects,
+          tasks,
+          currentProjectId: projects[0]?.id ?? null,
+          loaded: true
+        });
+      } finally {
+        set({ loading: false });
+      }
+    })();
   },
   setProject(id) { set({ currentProjectId: id }); },
 
   async createTeam(p) {
     const team = await api.projects.createTeam(p);
-    set({ teams: [...get().teams, team], currentTeamId: team.id });
+    set({
+      teams: [...get().teams, team],
+      projects: [],
+      tasks: [],
+      currentTeamId: team.id,
+      currentProjectId: null
+    });
+    return team;
+  },
+  async joinTeam(id) {
+    const team = await api.projects.joinTeam(id);
+    const teams = get().teams.some(t => t.id === team.id)
+      ? get().teams.map(t => t.id === team.id ? team : t)
+      : [...get().teams, team];
+    set({
+      teams,
+      projects: [],
+      tasks: [],
+      currentTeamId: team.id,
+      currentProjectId: null,
+      loading: true
+    });
+
+    try {
+      const [projects, tasks] = await Promise.all([
+        api.projects.listProjects(team.id),
+        api.projects.listTasks(undefined, team.id),
+      ]);
+      set({
+        projects,
+        tasks,
+        currentProjectId: projects[0]?.id ?? null,
+        loaded: true
+      });
+    } finally {
+      set({ loading: false });
+    }
+
     return team;
   },
   async createProject(p) {
@@ -75,6 +143,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     if (!projectId) throw new Error("No active project");
     const t = await api.projects.createTask({ ...p, projectId });
     set({ tasks: [t, ...get().tasks] });
+    void useNotificationsStore.getState().fetch();
     return t;
   },
   async move(id, status) {
@@ -88,6 +157,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     try {
       const next = await api.projects.updateTask(id, patch);
       set({ tasks: get().tasks.map(t => t.id === id ? next : t) });
+      void useNotificationsStore.getState().fetch();
       return next;
     } catch (e) { set({ tasks: prev }); throw e; }
   },

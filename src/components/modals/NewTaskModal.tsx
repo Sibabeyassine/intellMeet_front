@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,12 @@ export function NewTaskModal() {
   const [priority, setPriority] = useState<TaskPriority>("med");
   const [status, setStatus] = useState<TaskStatus>(initialStatus);
   const [projectId, setProjectId] = useState<string>(currentProjectId ?? projects[0]?.id ?? "");
+
+  useEffect(() => {
+    if (!open) return;
+    setStatus(initialStatus);
+    setProjectId(currentProjectId ?? projects[0]?.id ?? "");
+  }, [currentProjectId, initialStatus, open, projects]);
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Loader2, Mail, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Loader2, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,8 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pendingEmail, setPendingEmail] = useState("");
   const [pendingPassword, setPendingPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/dashboard";
 
   const loginSchema = z.object({
@@ -41,10 +43,15 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
     fullName: z.string().trim().min(2, t("auth.errors.name")).max(80),
   });
   const verifySchema = z.object({
-    code: z.string().trim().regex(/^\d{4}$/, "Code de verification invalide"),
+    code: z.string().trim().regex(/^\d{4}$/, t("auth.errors.verifyCode")),
   });
 
   useEffect(() => { setCurrent(mode); }, [mode]);
+  useEffect(() => {
+    setErrors({});
+    setVerificationCode("");
+    setShowPassword(false);
+  }, [current]);
   useEffect(() => { if (isAuth) navigate(redirectTo, { replace: true }); }, [isAuth, navigate, redirectTo]);
 
   const submit = async (e: React.FormEvent) => {
@@ -55,14 +62,14 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
       email: String(fd.get("email") ?? ""),
       password: String(fd.get("password") ?? ""),
       fullName: String(fd.get("name") ?? ""),
-      code: String(fd.get("code") ?? ""),
+      code: verificationCode,
     };
     try {
       if (current === "verify") {
         const parsed = verifySchema.parse({ code: data.code });
         await verifyEmail({ email: pendingEmail, code: parsed.code });
         await login({ email: pendingEmail, password: pendingPassword });
-        toast.success("Email verifie, connexion reussie");
+        toast.success(t("auth.emailVerified"));
         navigate(redirectTo, { replace: true });
       } else if (isRegister) {
         const parsed = registerSchema.parse(data) as { email: string; password: string; fullName: string };
@@ -75,7 +82,7 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
         setPendingEmail(parsed.email);
         setPendingPassword(parsed.password);
         setCurrent("verify");
-        toast.success("Compte cree. Verifie ton email avec le code recu.");
+        toast.success(t("auth.accountCreatedVerify"));
       } else {
         const parsed = loginSchema.parse({ email: data.email, password: data.password }) as { email: string; password: string };
         await login(parsed);
@@ -97,7 +104,7 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
     if (!pendingEmail) return;
     try {
       await resendVerification(pendingEmail);
-      toast.success("Nouveau code envoye");
+      toast.success(t("auth.resendSent"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("auth.errors.generic"));
     }
@@ -119,24 +126,38 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
         <div className="mx-auto w-full max-w-md py-12">
           <div className="animate-fade-in">
             <h1 className="font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-              {current === "verify" ? "Verifier ton email" : isRegister ? t("auth.registerTitle") : t("auth.loginTitle")}
+              {current === "verify" ? t("auth.verifyTitle") : isRegister ? t("auth.registerTitle") : t("auth.loginTitle")}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              {current === "verify" ? `Entre le code a 4 chiffres envoye a ${pendingEmail}.` : isRegister ? t("auth.registerSubtitle") : t("auth.loginSubtitle")}
+              {current === "verify" ? t("auth.verifySubtitle", { email: pendingEmail }) : isRegister ? t("auth.registerSubtitle") : t("auth.loginSubtitle")}
             </p>
           </div>
 
-          <form onSubmit={submit} className="space-y-4 animate-fade-in" noValidate>
+          <form key={current} onSubmit={submit} className="space-y-4 animate-fade-in" noValidate>
             {current === "verify" ? (
               <div className="grid gap-1.5">
-                <Label htmlFor="code">Code de verification</Label>
-                <Input id="code" name="code" inputMode="numeric" maxLength={4} placeholder="1234" required className="h-11 rounded-xl text-center tracking-[0.4em]" aria-invalid={!!errors.code} />
+                <Label htmlFor="verification-code">{t("auth.verificationCode")}</Label>
+                <Input
+                  id="verification-code"
+                  name="verification-code"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  placeholder="1234"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 4))}
+                  required
+                  className="h-11 rounded-xl text-center tracking-[0.4em]"
+                  aria-invalid={!!errors.code}
+                />
                 {errors.code && <p className="text-xs text-destructive">{errors.code}</p>}
               </div>
             ) : isRegister && (
               <div className="grid gap-1.5">
                 <Label htmlFor="name">{t("auth.fullName")}</Label>
-                <Input id="name" name="name" placeholder={t("auth.fullNamePlaceholder")} required className="h-11 rounded-xl" aria-invalid={!!errors.fullName} />
+                <Input id="name" name="name" autoComplete="name" placeholder={t("auth.fullNamePlaceholder")} required className="h-11 rounded-xl" aria-invalid={!!errors.fullName} />
                 {errors.fullName && <p className="text-xs text-destructive">{errors.fullName}</p>}
               </div>
             )}
@@ -144,7 +165,7 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
               <Label htmlFor="email">{t("auth.email")}</Label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="email" name="email" type="email" placeholder={t("auth.emailPlaceholder")} required className="h-11 rounded-xl pl-9" aria-invalid={!!errors.email} />
+                <Input id="email" name="email" type="email" autoComplete="email" placeholder={t("auth.emailPlaceholder")} required className="h-11 rounded-xl pl-9" aria-invalid={!!errors.email} />
               </div>
               {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
             </div>}
@@ -155,13 +176,32 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
                   <button type="button" onClick={() => toast(t("auth.resetSent"))} className="text-xs font-medium text-primary hover:underline">{t("auth.forgot")}</button>
                 )}
               </div>
-              <Input id="password" name="password" type="password" placeholder="••••••••" required className="h-11 rounded-xl" aria-invalid={!!errors.password} />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={isRegister ? "new-password" : "current-password"}
+                  placeholder="••••••••"
+                  required
+                  className="h-11 rounded-xl pr-10"
+                  aria-invalid={!!errors.password}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
+                  aria-label={showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
             </div>}
 
             {current === "verify" ? (
               <button type="button" onClick={resendCode} className="text-xs font-medium text-primary hover:underline">
-                Renvoyer le code
+                {t("auth.resendCode")}
               </button>
             ) : isRegister ? (
               <label className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -174,13 +214,13 @@ const Auth = ({ mode = "login" as Mode }: { mode?: Mode }) => {
             )}
 
             <Button type="submit" variant="hero" size="lg" className="w-full gap-2" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (current === "verify" ? "Verifier et se connecter" : isRegister ? t("auth.register") : t("auth.login"))}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (current === "verify" ? t("auth.verifyAndLogin") : isRegister ? t("auth.register") : t("auth.login"))}
               {!loading && <ArrowRight className="h-4 w-4" />}
             </Button>
           </form>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            {current === "verify" ? "Mauvais email ?" : isRegister ? t("auth.haveAccount") : t("auth.noAccount")}{" "}
+            {current === "verify" ? t("auth.wrongEmail") : isRegister ? t("auth.haveAccount") : t("auth.noAccount")}{" "}
             <button
               type="button"
               onClick={() => navigate(isRegister || current === "verify" ? "/login" : "/register")}

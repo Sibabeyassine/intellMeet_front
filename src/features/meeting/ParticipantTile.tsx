@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Mic, MicOff, Pin, ScreenShare, Video, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Participant } from "@/services";
@@ -10,6 +11,14 @@ interface Props {
 
 export function ParticipantTile({ participant, className, isPinned }: Props) {
   const { name, initials, color, isSpeaking, isMuted, isCameraOn, isHost, isYou, isScreenSharing } = participant;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (videoRef.current && participant.stream) {
+      videoRef.current.srcObject = participant.stream;
+    }
+  }, [isCameraOn, participant.stream]);
+
   return (
     <div
       className={cn(
@@ -19,17 +28,14 @@ export function ParticipantTile({ participant, className, isPinned }: Props) {
       )}
     >
       {/* Video / Avatar */}
-      {isCameraOn ? (
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `radial-gradient(120% 80% at 30% 20%, hsl(${color} / 0.55), hsl(${color} / 0.15) 60%, hsl(222 47% 8%) 100%)`,
-          }}
-        >
-          {/* faux visage / mouvement */}
-          <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/5 blur-2xl animate-blob" />
-          <div className="absolute inset-x-8 bottom-10 h-20 rounded-3xl bg-white/5 blur-xl" />
-        </div>
+      {isCameraOn && participant.stream ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isYou}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-secondary to-muted">
           <div

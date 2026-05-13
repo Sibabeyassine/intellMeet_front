@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/services";
+import { useNotificationsStore } from "@/store/notifications";
 import type { CreateMeetingPayload, Meeting } from "@/services";
 
 interface MeetingsState {
@@ -25,6 +26,7 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   async create(p) {
     const m = await api.meetings.create(p);
     set({ list: [m, ...get().list] });
+    void useNotificationsStore.getState().fetch();
     return m;
   },
   async remove(id) {
