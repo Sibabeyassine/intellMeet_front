@@ -1,4 +1,4 @@
-import { Bell, Check, Command, Search } from "lucide-react";
+import { Bell, Check, Command, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -19,7 +19,15 @@ interface Props {
 }
 
 const iconFor = (kind: Notification["kind"]) =>
-  kind === "ai" ? Sparkles : kind === "meeting" ? Calendar : kind === "mention" ? AtSign : CheckCircle2;
+  kind === "ai"
+    ? Sparkles
+    : kind === "meeting"
+      ? Calendar
+      : kind === "mention"
+        ? AtSign
+        : kind === "message"
+          ? MessageSquare
+          : CheckCircle2;
 
 export function AppTopbar({ title, description, actions }: Props) {
   const openModal = useUIStore(s => s.open);

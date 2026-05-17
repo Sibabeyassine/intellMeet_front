@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Copy, Loader2, Mail, UserPlus } from "lucide-react";
+import { Loader2, Mail, ShieldCheck, UserPlus } from "lucide-react";
 import { useUIStore } from "@/store/ui";
 import { useProjectsStore } from "@/store/projects";
 import { api } from "@/services";
@@ -20,7 +19,6 @@ export function InviteTeamModal() {
   const fetchAll = useProjectsStore(s => s.fetchAll);
   const [loading, setLoading] = useState(false);
   const teamId = currentTeamId ?? teams[0]?.id;
-  const inviteLink = teamId ? `${window.location.origin}/projects?workspaceId=${teamId}` : window.location.origin;
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -41,8 +39,6 @@ export function InviteTeamModal() {
     }
   };
 
-  const copy = () => { navigator.clipboard?.writeText(inviteLink); toast.success(t("common.copied")); };
-
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
@@ -54,12 +50,11 @@ export function InviteTeamModal() {
         </DialogHeader>
 
         <div className="min-w-0 space-y-4">
-          <div className="grid min-w-0 gap-1.5">
-            <Label>{t("modals.invite.linkLabel")}</Label>
-            <div className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">{inviteLink}</span>
-              <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" onClick={copy}><Copy className="h-3.5 w-3.5" /></Button>
-            </div>
+          <div className="flex gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <p>
+              Les invitations sont envoyées par email aux comptes IntellMeet déjà vérifiés. Le lien public a été désactivé pour éviter qu'une personne non invitée rejoigne l'équipe.
+            </p>
           </div>
 
           <form onSubmit={submit} className="min-w-0 space-y-3">

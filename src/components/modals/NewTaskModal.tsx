@@ -20,15 +20,18 @@ export function NewTaskModal() {
   const create = useProjectsStore(s => s.create);
   const currentProjectId = useProjectsStore(s => s.currentProjectId);
   const projects = useProjectsStore(s => s.projects);
+  const members = useProjectsStore(s => s.members);
   const [loading, setLoading] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("med");
   const [status, setStatus] = useState<TaskStatus>(initialStatus);
   const [projectId, setProjectId] = useState<string>(currentProjectId ?? projects[0]?.id ?? "");
+  const [assigneeId, setAssigneeId] = useState<string>("unassigned");
 
   useEffect(() => {
     if (!open) return;
     setStatus(initialStatus);
     setProjectId(currentProjectId ?? projects[0]?.id ?? "");
+    setAssigneeId("unassigned");
   }, [currentProjectId, initialStatus, open, projects]);
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -48,6 +51,7 @@ export function NewTaskModal() {
         description: String(fd.get("description") ?? ""),
         dueDate,
         priority, status,
+        assigneeId: assigneeId === "unassigned" ? undefined : assigneeId,
       });
       toast.success(t("projects.taskCreated"));
       close();
@@ -112,6 +116,20 @@ export function NewTaskModal() {
           <div className="grid gap-1.5">
             <Label htmlFor="due">{t("projects.form.due")}</Label>
             <Input id="due" name="due" type="date" />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Responsable</Label>
+            <Select value={assigneeId} onValueChange={setAssigneeId}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">Non assignée</SelectItem>
+                {members.map(member => (
+                  <SelectItem key={member.userId} value={member.userId}>
+                    {member.name} · {member.role}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>{t("common.cancel")}</Button>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Copy, Lock, Users } from "lucide-react";
+import { ArrowLeft, Copy, Lock, Mic, MicOff, Users } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { io, Socket } from "socket.io-client";
 import { useTranslation } from "react-i18next";
@@ -34,6 +34,13 @@ type RealtimeSignal = {
   signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
 };
 
+type MediaStatePayload = {
+  userId: string;
+  micOn: boolean;
+  cameraOn: boolean;
+  screenSharing: boolean;
+};
+
 const readAccessToken = () => {
   try {
     return JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null")?.accessToken as string | undefined;
@@ -46,6 +53,16 @@ function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
   const seconds = Math.floor(totalSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function initialsFor(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "PT";
 }
 
 const MeetingRoom = () => {
@@ -75,12 +92,28 @@ const MeetingRoom = () => {
   const localStreamRef = useRef<MediaStream | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [renewingSession, setRenewingSession] = useState(false);
   const [now, setNow] = useState(Date.now());
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
+  const mediaStateRef = useRef({ micOn, cameraOn, screenSharing });
+  const emitMediaState = (
+    state: { micOn?: boolean; cameraOn?: boolean; screenSharing?: boolean } = {}
+  ) => {
+    if (!meetingId || !socketRef.current?.connected) return;
+    const mediaState = { ...mediaStateRef.current, ...state };
+
+    socketRef.current.emit("meeting:media-state", {
+      meetingId,
+      micOn: mediaState.micOn,
+      cameraOn: mediaState.cameraOn,
+      screenSharing: mediaState.screenSharing
+    });
+  };
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
@@ -92,6 +125,10 @@ const MeetingRoom = () => {
   useEffect(() => {
     localStreamRef.current = localStream;
   }, [localStream]);
+
+  useEffect(() => {
+    mediaStateRef.current = { micOn, cameraOn, screenSharing };
+  }, [cameraOn, micOn, screenSharing]);
 
   const ensureLocalStream = async () => {
     if (localStream) return localStream;
@@ -170,9 +207,13 @@ const MeetingRoom = () => {
     setActionItems([]);
     setSuggestions([]);
     void (async () => {
-      const loadedMeeting = await api.meetings.join(id).catch(() => api.meetings.get(id));
+      let loadedMeeting = await api.meetings.join(id).catch(() => api.meetings.get(id));
+      if (loadedMeeting?.status === "scheduled" && loadedMeeting.hostId === user?.id) {
+        loadedMeeting = await api.meetings.start(id).catch(() => loadedMeeting);
+      }
       if (!alive || !loadedMeeting) return;
       setMeeting(loadedMeeting);
+      setSessionExpired(false);
 
       const [loadedSummary, loadedTranscript, loadedActions, loadedSuggestions] = await Promise.all([
         api.meetings.getSummary(id).catch(() => null),
@@ -188,7 +229,7 @@ const MeetingRoom = () => {
     })();
 
     return () => { alive = false; };
-  }, [meetingId, meetings, navigate]);
+  }, [meetingId, meetings, navigate, user?.id]);
 
   useEffect(() => {
     if (!meetingId || !user || !localStream) return;
@@ -230,13 +271,24 @@ const MeetingRoom = () => {
       peer.ontrack = (event) => {
         const [stream] = event.streams;
         if (stream) {
-          upsertRemote({
-            id: remoteUserId,
-            name: "Participant",
-            initials: "PT",
-            color: "265 70% 60%",
-            isCameraOn: stream.getVideoTracks().some((track) => track.enabled),
-            stream
+          setRemoteParticipants((current) => {
+            const existing = current.find((item) => item.id === remoteUserId);
+            const name = existing?.name ?? "Participant";
+            const nextParticipant: RemoteParticipant = {
+              id: remoteUserId,
+              socketId: existing?.socketId,
+              name,
+              initials: existing?.initials ?? initialsFor(name),
+              color: existing?.color ?? "265 70% 60%",
+              isMuted: existing?.isMuted,
+              isCameraOn: stream.getVideoTracks().some((track) => track.enabled),
+              stream
+            };
+
+            if (!existing) return [...current, nextParticipant];
+            return current.map((item) =>
+              item.id === remoteUserId ? { ...item, ...nextParticipant } : item
+            );
           });
         }
       };
@@ -253,6 +305,16 @@ const MeetingRoom = () => {
       socket.emit("meeting:join", { meetingId });
     });
 
+    socket.on("meeting:joined", () => {
+      const mediaState = mediaStateRef.current;
+      socket.emit("meeting:media-state", {
+        meetingId,
+        micOn: mediaState.micOn,
+        cameraOn: mediaState.cameraOn,
+        screenSharing: mediaState.screenSharing
+      });
+    });
+
     socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
       if (payload.userId === user.id) return;
       upsertRemote({
@@ -263,6 +325,7 @@ const MeetingRoom = () => {
         color: "265 70% 60%",
         isCameraOn: false
       });
+      emitMediaState();
       const peer = peerFor(payload.userId);
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
@@ -271,6 +334,22 @@ const MeetingRoom = () => {
 
     socket.on("participant:left", (payload: { userId: string }) => {
       removeRemote(payload.userId);
+    });
+
+    socket.on("participant:media-state", (payload: MediaStatePayload) => {
+      if (payload.userId === user.id) return;
+      setRemoteParticipants((current) =>
+        current.map((participant) =>
+          participant.id === payload.userId
+            ? {
+                ...participant,
+                isMuted: !payload.micOn,
+                isCameraOn: payload.cameraOn || payload.screenSharing,
+                isScreenSharing: payload.screenSharing
+              }
+            : participant
+        )
+      );
     });
 
     socket.on("meeting:signal", async (payload: RealtimeSignal) => {
@@ -323,15 +402,11 @@ const MeetingRoom = () => {
       isScreenSharing: screenSharing,
       stream: localStream ?? undefined
     };
-    const source = meeting?.participants?.length ? meeting.participants : [];
-    const meetingParticipants = source.map(p =>
-      p.isYou || p.id === user?.id
-        ? { ...p, isYou: true, isMuted: !micOn, isCameraOn: cameraOn || screenSharing, isScreenSharing: screenSharing, stream: localStream ?? undefined }
-        : p
-    );
-    const withoutLocal = meetingParticipants.filter((p) => p.id !== fallbackParticipant.id);
-    return [fallbackParticipant, ...withoutLocal, ...remoteParticipants.filter((p) => p.id !== fallbackParticipant.id)];
-  }, [cameraOn, localStream, meeting, micOn, remoteParticipants, screenSharing, user]);
+    return [
+      fallbackParticipant,
+      ...remoteParticipants.filter((p) => p.id !== fallbackParticipant.id)
+    ];
+  }, [cameraOn, localStream, meeting?.hostId, micOn, remoteParticipants, screenSharing, user]);
   const mainSpeaker = participants.find(p => p.isSpeaking) ?? participants[0];
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
@@ -343,10 +418,13 @@ const MeetingRoom = () => {
     : 0;
   const meetingTimeLabel =
     meeting?.status === "live"
-      ? `${formatDuration(remainingSeconds)} restantes`
+      ? sessionExpired
+        ? "Session expiree"
+        : `${formatDuration(remainingSeconds)} restantes`
       : meeting?.status === "scheduled"
         ? `Planifiee · ${meeting.durationMin} min`
         : "Terminee";
+  const isHost = meeting?.hostId === user?.id;
 
   const replaceOutgoingVideoTrack = (track: MediaStreamTrack | null) => {
     Object.values(peersRef.current).forEach((peer) => {
@@ -371,6 +449,8 @@ const MeetingRoom = () => {
       const next = !micOn;
       stream.getAudioTracks().forEach((track) => { track.enabled = next; });
       setMicOn(next);
+      emitMediaState({ micOn: next });
+      toast(next ? "Micro activé" : "Micro coupé");
     } catch {
       toast.error("Impossible d'activer le micro. Vérifie les permissions du navigateur.");
     }
@@ -382,6 +462,7 @@ const MeetingRoom = () => {
       const next = !cameraOn;
       stream.getVideoTracks().forEach((track) => { track.enabled = next; });
       setCameraOn(next);
+      emitMediaState({ cameraOn: next });
     } catch {
       toast.error("Impossible d'activer la caméra. Vérifie les permissions du navigateur.");
     }
@@ -393,6 +474,7 @@ const MeetingRoom = () => {
     screenTrackRef.current?.stop();
     screenTrackRef.current = null;
     setScreenSharing(false);
+    emitMediaState({ screenSharing: false, cameraOn });
 
     const cameraTrack = cameraTrackRef.current;
     if (cameraTrack && cameraTrack.readyState === "live") {
@@ -428,6 +510,7 @@ const MeetingRoom = () => {
       replaceLocalVideoTrack(screenTrack);
       setScreenSharing(true);
       setCameraOn(true);
+      emitMediaState({ screenSharing: true, cameraOn: true });
       toast.success("Partage d'écran lancé");
     } catch (error) {
       if ((error as Error).name !== "NotAllowedError") {
@@ -445,7 +528,7 @@ const MeetingRoom = () => {
     localStream?.getTracks().forEach((track) => track.stop());
 
     if (meeting?.id && meeting.hostId === user?.id) {
-      await api.meetings.update(meeting.id, { status: "ended" }).catch(() => undefined);
+      await api.meetings.end(meeting.id).catch(() => undefined);
       toast.success("Réunion terminée");
     } else {
       toast.success("Tu as quitté la réunion");
@@ -460,22 +543,46 @@ const MeetingRoom = () => {
     }
 
     autoEndedRef.current = true;
-    void (async () => {
-      stopRecording();
-      stopScreenShare();
-      socketRef.current?.disconnect();
-      Object.values(peersRef.current).forEach((peer) => peer.close());
-      peersRef.current = {};
-      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    setSessionExpired(true);
+    toast("Temps de réunion écoulé");
+  }, [meeting, remainingSeconds]);
 
-      if (meeting.hostId === user?.id) {
-        await api.meetings.update(meeting.id, { status: "ended" }).catch(() => undefined);
-      }
+  useEffect(() => {
+    if (!sessionExpired || !meeting?.id) return;
 
-      toast.success("Temps de réunion écoulé");
-      navigate("/dashboard");
-    })();
-  }, [meeting, navigate, remainingSeconds, user?.id]);
+    const interval = window.setInterval(() => {
+      void api.meetings.get(meeting.id).then((freshMeeting) => {
+        if (!freshMeeting) return;
+        setMeeting(freshMeeting);
+        const freshEndsAt = new Date(
+          new Date(freshMeeting.scheduledAt).getTime() + freshMeeting.durationMin * 60000
+        ).getTime();
+        if (freshMeeting.status === "live" && freshEndsAt > Date.now()) {
+          autoEndedRef.current = false;
+          setSessionExpired(false);
+          toast.success("Session renouvelée");
+        }
+      }).catch(() => undefined);
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [meeting?.id, sessionExpired]);
+
+  const renewMeeting = async (durationMin = 30) => {
+    if (!meeting?.id || !isHost || renewingSession) return;
+    setRenewingSession(true);
+    try {
+      const updatedMeeting = await api.meetings.extend(meeting.id, durationMin);
+      setMeeting(updatedMeeting);
+      autoEndedRef.current = false;
+      setSessionExpired(false);
+      toast.success(`Réunion renouvelée de ${durationMin} min`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Impossible de renouveler la réunion");
+    } finally {
+      setRenewingSession(false);
+    }
+  };
 
   const stopRecording = () => {
     const recorder = recorderRef.current;
@@ -620,6 +727,13 @@ const MeetingRoom = () => {
             <Users className="h-3 w-3" />
             {participants.length}
           </Badge>
+          <Badge
+            variant={micOn ? "secondary" : "destructive"}
+            className="hidden gap-1.5 sm:flex"
+          >
+            {micOn ? <Mic className="h-3 w-3" /> : <MicOff className="h-3 w-3" />}
+            {micOn ? "Micro actif" : "Micro coupé"}
+          </Badge>
           <ThemeToggle />
         </div>
       </header>
@@ -665,6 +779,35 @@ const MeetingRoom = () => {
               onLeave={leaveMeeting}
             />
           </div>
+          {sessionExpired && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 text-center shadow-elev-lg">
+                <p className="font-display text-lg font-semibold text-foreground">
+                  Temps de réunion écoulé
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {isHost
+                    ? "Tu peux renouveler la session ou terminer la réunion."
+                    : "La session est expirée. Attends que l'hôte la renouvelle ou quitte la réunion."}
+                </p>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  {isHost && (
+                    <>
+                      <Button disabled={renewingSession} onClick={() => void renewMeeting(15)}>
+                        +15 min
+                      </Button>
+                      <Button disabled={renewingSession} onClick={() => void renewMeeting(30)}>
+                        +30 min
+                      </Button>
+                    </>
+                  )}
+                  <Button variant={isHost ? "danger" : "outline"} onClick={leaveMeeting}>
+                    {isHost ? "Terminer" : "Quitter"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         {/* Sidebar (chat/notes/transcript) */}

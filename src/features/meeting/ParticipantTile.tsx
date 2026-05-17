@@ -12,10 +12,14 @@ interface Props {
 export function ParticipantTile({ participant, className, isPinned }: Props) {
   const { name, initials, color, isSpeaking, isMuted, isCameraOn, isHost, isYou, isScreenSharing } = participant;
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (videoRef.current && participant.stream) {
       videoRef.current.srcObject = participant.stream;
+    }
+    if (audioRef.current && participant.stream) {
+      audioRef.current.srcObject = participant.stream;
     }
   }, [isCameraOn, participant.stream]);
 
@@ -28,12 +32,15 @@ export function ParticipantTile({ participant, className, isPinned }: Props) {
       )}
     >
       {/* Video / Avatar */}
+      {!isYou && participant.stream && (
+        <audio ref={audioRef} autoPlay playsInline className="hidden" />
+      )}
       {isCameraOn && participant.stream ? (
         <video
           ref={videoRef}
           autoPlay
           playsInline
-          muted={isYou}
+          muted
           className="absolute inset-0 h-full w-full object-cover"
         />
       ) : (

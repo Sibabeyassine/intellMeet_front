@@ -36,6 +36,7 @@ import type {
   TaskPriority,
   TaskStatus,
   Team,
+  TeamMember,
   TranscriptLine,
   User
 } from "./types";
@@ -62,6 +63,16 @@ type BackendWorkspace = {
   description?: string;
   members?: Array<{ userId: string; status: string }>;
   createdAt: string;
+};
+
+type BackendWorkspaceMember = {
+  userId: string;
+  name: string;
+  email?: string;
+  avatarUrl?: string;
+  role: "owner" | "admin" | "member";
+  status: "active" | "invited" | "removed";
+  joinedAt?: string;
 };
 
 type BackendProject = {
@@ -95,6 +106,13 @@ type BackendMeeting = {
   status: "scheduled" | "live" | "completed" | "cancelled";
   hostId: string;
   participantIds?: string[];
+  participants?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    avatarUrl?: string;
+    isHost?: boolean;
+  }>;
   recordingUrl?: string;
   transcript?: string;
   summary?: string;
@@ -103,7 +121,12 @@ type BackendMeeting = {
 
 type BackendNotification = {
   id: string;
-  type: "task_assigned" | "meeting_updated" | "meeting_reminder" | "system";
+  type:
+    | "task_assigned"
+    | "chat_message"
+    | "meeting_updated"
+    | "meeting_reminder"
+    | "system";
   title: string;
   message: string;
   data?: Record<string, unknown>;
@@ -117,6 +140,11 @@ type BackendChatMessage = {
   senderId: string;
   message: string;
   createdAt: string;
+  sender?: {
+    id: string;
+    name: string;
+    email?: string;
+  };
 };
 
 type BackendMediaFile = {
@@ -306,6 +334,18 @@ const mapTeam = (workspace: BackendWorkspace): Team => ({
   createdAt: workspace.createdAt
 });
 
+const mapTeamMember = (member: BackendWorkspaceMember): TeamMember => ({
+  userId: member.userId,
+  name: member.name,
+  email: member.email,
+  avatarUrl: member.avatarUrl,
+  role: member.role,
+  status: member.status,
+  joinedAt: member.joinedAt,
+  initials: initialsFor(member.name),
+  color: colorFor(member.userId)
+});
+
 const mapProject = (project: BackendProject): Project => ({
   id: project.id,
   teamId: project.workspaceId,
@@ -344,6 +384,7 @@ const mapTask = (task: BackendTask): Task => ({
   description: task.description,
   status: mapTaskStatus(task.status),
   priority: mapTaskPriority(task.priority),
+  assigneeId: task.assigneeId,
   assignees: task.assigneeId
     ? [{ initials: "MB", color: colorFor(task.assigneeId) }]
     : [],
@@ -365,35 +406,44 @@ const minutesBetween = (start: string, end?: string) => {
   );
 };
 
-const mapMeeting = (meeting: BackendMeeting): Meeting => ({
-  id: meeting.id,
-  title: meeting.title,
-  description: meeting.description,
-  scheduledAt: meeting.startsAt,
-  durationMin: minutesBetween(meeting.startsAt, meeting.endsAt),
-  status: mapMeetingStatus(meeting.status),
-  hostId: meeting.hostId,
-  participants: [
-    {
-      id: meeting.hostId,
-      name: "Host",
-      initials: "HO",
-      color: colorFor(meeting.hostId),
-      isHost: true
-    },
-    ...(meeting.participantIds ?? [])
-      .filter((participantId) => participantId !== meeting.hostId)
-      .map((participantId, index) => ({
-        id: participantId,
-        name: `Participant ${index + 1}`,
-        initials: `P${index + 1}`,
-        color: colorFor(participantId)
-      }))
-  ],
-  inviteUrl: `/meeting/${meeting.id}`,
-  recordingUrl: meeting.recordingUrl,
-  hasAISummary: Boolean(meeting.summary)
-});
+const mapMeeting = (meeting: BackendMeeting): Meeting => {
+  const backendParticipants = meeting.participants?.length
+    ? meeting.participants
+    : [
+        {
+          id: meeting.hostId,
+          name: "Host",
+          isHost: true
+        },
+        ...(meeting.participantIds ?? [])
+          .filter((participantId) => participantId !== meeting.hostId)
+          .map((participantId, index) => ({
+            id: participantId,
+            name: `Participant ${index + 1}`,
+            isHost: false
+          }))
+      ];
+
+  return {
+    id: meeting.id,
+    title: meeting.title,
+    description: meeting.description,
+    scheduledAt: meeting.startsAt,
+    durationMin: minutesBetween(meeting.startsAt, meeting.endsAt),
+    status: mapMeetingStatus(meeting.status),
+    hostId: meeting.hostId,
+    participants: backendParticipants.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      initials: initialsFor(participant.name),
+      color: colorFor(participant.id),
+      isHost: participant.isHost ?? participant.id === meeting.hostId
+    })),
+    inviteUrl: `/meeting/${meeting.id}`,
+    recordingUrl: meeting.recordingUrl,
+    hasAISummary: Boolean(meeting.summary)
+  };
+};
 
 const mapNotification = (notification: BackendNotification): Notification => {
   const data = notification.data ?? {};
@@ -410,6 +460,8 @@ const mapNotification = (notification: BackendNotification): Notification => {
     kind:
       notification.type === "task_assigned"
         ? "task"
+        : notification.type === "chat_message"
+          ? "message"
         : notification.type === "system"
           ? "ai"
           : "meeting"
@@ -428,6 +480,30 @@ const mapMediaFile = (file: BackendMediaFile): MediaFile => ({
   url: file.url.startsWith("http") ? file.url : `${API_URL.replace(/\/api$/, "")}${file.url}`,
   createdAt: file.createdAt
 });
+
+const mapChatMessage = (message: BackendChatMessage): ChatMessage => {
+  const session = readSession();
+  const isYou = message.senderId === session?.user.id;
+  const authorName = isYou
+    ? "Toi"
+    : message.sender?.name ?? message.sender?.email ?? "Membre";
+
+  return {
+    id: message.id,
+    channelId: message.meetingId,
+    authorId: message.senderId,
+    authorName,
+    initials: isYou ? session?.user.initials ?? "ME" : initialsFor(authorName),
+    color: isYou ? session?.user.color ?? "152 70% 45%" : colorFor(message.senderId),
+    time: new Date(message.createdAt).toLocaleTimeString("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    }),
+    text: message.message,
+    isYou,
+    createdAt: message.createdAt
+  };
+};
 
 const activeWorkspaceId = () => localStorage.getItem(ACTIVE_WORKSPACE_KEY);
 const setActiveWorkspaceId = (id: string) =>
@@ -539,19 +615,18 @@ const projects: ProjectsAPI = {
     }
     return workspaces.map(mapTeam);
   },
+  async listTeamMembers(teamId) {
+    const members = await unwrap<BackendWorkspaceMember[]>(
+      client.get(`/workspaces/${teamId}/members`)
+    );
+    return members.map(mapTeamMember);
+  },
   async createTeam(payload: CreateTeamPayload) {
     const workspace = await unwrap<BackendWorkspace>(
       client.post("/workspaces", {
         name: payload.name,
         description: "Created from IntellMeet frontend"
       })
-    );
-    setActiveWorkspaceId(workspace.id);
-    return mapTeam(workspace);
-  },
-  async joinTeam(teamId) {
-    const workspace = await unwrap<BackendWorkspace>(
-      client.post(`/workspaces/${teamId}/join`)
     );
     setActiveWorkspaceId(workspace.id);
     return mapTeam(workspace);
@@ -617,6 +692,7 @@ const projects: ProjectsAPI = {
         description: payload.description,
         status: toBackendTaskStatus(payload.status),
         priority: toBackendPriority(payload.priority),
+        assigneeId: payload.assigneeId,
         dueDate: payload.dueDate
       })
     );
@@ -635,7 +711,8 @@ const projects: ProjectsAPI = {
         description: patch.description,
         dueDate: patch.dueDate,
         status: toBackendTaskStatus(patch.status),
-        priority: toBackendPriority(patch.priority)
+        priority: toBackendPriority(patch.priority),
+        assigneeId: patch.assigneeId
       })
     );
     return mapTask(task);
@@ -661,6 +738,22 @@ const meetings: MeetingsAPI = {
   },
   async join(id) {
     const meeting = await unwrap<BackendMeeting>(client.post(`/meetings/${id}/join`));
+    setActiveMeetingId(meeting.id);
+    return mapMeeting(meeting);
+  },
+  async start(id) {
+    const meeting = await unwrap<BackendMeeting>(client.post(`/meetings/${id}/start`));
+    setActiveMeetingId(meeting.id);
+    return mapMeeting(meeting);
+  },
+  async end(id) {
+    const meeting = await unwrap<BackendMeeting>(client.post(`/meetings/${id}/end`));
+    return mapMeeting(meeting);
+  },
+  async extend(id, durationMin = 30) {
+    const meeting = await unwrap<BackendMeeting>(
+      client.post(`/meetings/${id}/extend`, { durationMin })
+    );
     setActiveMeetingId(meeting.id);
     return mapMeeting(meeting);
   },
@@ -774,20 +867,7 @@ const chat: ChatAPI = {
       }
       throw error;
     }
-    return messages.reverse().map((message): ChatMessage => ({
-      id: message.id,
-      channelId: message.meetingId,
-      authorId: message.senderId,
-      authorName: "Membre",
-      initials: "MB",
-      color: colorFor(message.senderId),
-      time: new Date(message.createdAt).toLocaleTimeString("fr-FR", {
-        hour: "2-digit",
-        minute: "2-digit"
-      }),
-      text: message.message,
-      createdAt: message.createdAt
-    }));
+    return messages.reverse().map(mapChatMessage);
   },
   async sendMessage(payload: SendMessagePayload) {
     let message: BackendChatMessage;
@@ -803,21 +883,7 @@ const chat: ChatAPI = {
       }
       throw error;
     }
-    return {
-      id: message.id,
-      channelId: message.meetingId,
-      authorId: message.senderId,
-      authorName: "Toi",
-      initials: "ME",
-      color: "152 70% 45%",
-      time: new Date(message.createdAt).toLocaleTimeString("fr-FR", {
-        hour: "2-digit",
-        minute: "2-digit"
-      }),
-      text: message.message,
-      isYou: true,
-      createdAt: message.createdAt
-    };
+    return mapChatMessage(message);
   },
   async createChannel(name) {
     const meeting = await meetings.create({
@@ -849,24 +915,7 @@ const chat: ChatAPI = {
     });
 
     socket.on("chat:message", (message: BackendChatMessage) => {
-      cb({
-        id: message.id,
-        channelId: message.meetingId,
-        authorId: message.senderId,
-        authorName: message.senderId === session.user.id ? "Toi" : "Membre",
-        initials: message.senderId === session.user.id ? session.user.initials : "MB",
-        color:
-          message.senderId === session.user.id
-            ? session.user.color
-            : colorFor(message.senderId),
-        time: new Date(message.createdAt).toLocaleTimeString("fr-FR", {
-          hour: "2-digit",
-          minute: "2-digit"
-        }),
-        text: message.message,
-        isYou: message.senderId === session.user.id,
-        createdAt: message.createdAt
-      });
+      cb(mapChatMessage(message));
     });
 
     return () => {

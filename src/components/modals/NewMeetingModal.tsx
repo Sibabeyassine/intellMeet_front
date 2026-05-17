@@ -51,7 +51,7 @@ export function NewMeetingModal() {
         participantEmails,
       });
       if (startNow) {
-        await api.meetings.update(meeting.id, { status: "live" });
+        await api.meetings.start(meeting.id);
       }
       toast.success(startNow ? t("modals.newMeeting.createdLive") : t("modals.newMeeting.createdScheduled"));
       close();

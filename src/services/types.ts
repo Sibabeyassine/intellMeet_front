@@ -106,6 +106,18 @@ export interface Team {
   createdAt: ISODate;
 }
 
+export interface TeamMember {
+  userId: ID;
+  name: string;
+  email?: string;
+  initials: string;
+  color: string;
+  role: "owner" | "admin" | "member";
+  status: "active" | "invited" | "removed";
+  joinedAt?: ISODate;
+  avatarUrl?: string;
+}
+
 export interface Project {
   id: ID;
   teamId: ID;
@@ -126,6 +138,7 @@ export interface Task {
   description?: string;
   status: TaskStatus;
   priority: TaskPriority;
+  assigneeId?: ID;
   assignees: { initials: string; color: string }[];
   /** ISO datetime — preferred. Used for calendar + sorting. */
   dueDate?: ISODate;
@@ -145,6 +158,7 @@ export interface CreateTaskPayload {
   description?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
+  assigneeId?: ID;
   dueDate?: ISODate;
   tag?: { label: string; color: string };
 }
@@ -195,7 +209,7 @@ export interface Notification {
   href?: string;
   read: boolean;
   createdAt: ISODate;
-  kind: "meeting" | "task" | "mention" | "ai";
+  kind: "meeting" | "task" | "mention" | "message" | "ai";
 }
 
 // ---------- MEDIA ----------

@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import { api } from "@/services";
 import { useNotificationsStore } from "@/store/notifications";
-import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team } from "@/services";
+import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team, TeamMember } from "@/services";
 
 interface ProjectsState {
   // entities
   teams: Team[];
+  members: TeamMember[];
   projects: Project[];
   tasks: Task[];
   // active context
@@ -20,7 +21,6 @@ interface ProjectsState {
   setTeam: (id: string | null) => void;
   setProject: (id: string | null) => void;
   createTeam: (p: CreateTeamPayload) => Promise<Team>;
-  joinTeam: (id: string) => Promise<Team>;
   createProject: (p: CreateProjectPayload) => Promise<Project>;
   create: (p: CreateTaskPayload) => Promise<Task>;
   move: (id: string, status: TaskStatus) => Promise<void>;
@@ -29,7 +29,7 @@ interface ProjectsState {
 }
 
 export const useProjectsStore = create<ProjectsState>((set, get) => ({
-  teams: [], projects: [], tasks: [],
+  teams: [], members: [], projects: [], tasks: [],
   currentTeamId: null, currentProjectId: null,
   loading: false, loaded: false,
 
@@ -42,17 +42,18 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       const teamId = state.currentTeamId && teams.some(t => t.id === state.currentTeamId)
         ? state.currentTeamId
         : teams[0]?.id ?? null;
-      const [projects, tasks] = teamId
+      const [members, projects, tasks] = teamId
         ? await Promise.all([
+            api.projects.listTeamMembers(teamId),
             api.projects.listProjects(teamId),
             api.projects.listTasks(undefined, teamId),
           ])
-        : [[], []];
+        : [[], [], []];
       const teamProjects = projects.filter(p => p.teamId === teamId);
       const projectId = state.currentProjectId && teamProjects.some(p => p.id === state.currentProjectId)
         ? state.currentProjectId
         : teamProjects[0]?.id ?? null;
-      set({ teams, projects, tasks, loaded: true, currentTeamId: teamId, currentProjectId: projectId });
+      set({ teams, members, projects, tasks, loaded: true, currentTeamId: teamId, currentProjectId: projectId });
     } finally { set({ loading: false }); }
   },
   fetch() { return get().fetchAll(); },
@@ -61,6 +62,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     set({
       currentTeamId: id,
       currentProjectId: null,
+      members: [],
       projects: [],
       tasks: [],
       loading: true
@@ -73,11 +75,13 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
           return;
         }
 
-        const [projects, tasks] = await Promise.all([
+        const [members, projects, tasks] = await Promise.all([
+          api.projects.listTeamMembers(id),
           api.projects.listProjects(id),
           api.projects.listTasks(undefined, id),
         ]);
         set({
+          members,
           projects,
           tasks,
           currentProjectId: projects[0]?.id ?? null,
@@ -94,42 +98,12 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     const team = await api.projects.createTeam(p);
     set({
       teams: [...get().teams, team],
+      members: [],
       projects: [],
       tasks: [],
       currentTeamId: team.id,
       currentProjectId: null
     });
-    return team;
-  },
-  async joinTeam(id) {
-    const team = await api.projects.joinTeam(id);
-    const teams = get().teams.some(t => t.id === team.id)
-      ? get().teams.map(t => t.id === team.id ? team : t)
-      : [...get().teams, team];
-    set({
-      teams,
-      projects: [],
-      tasks: [],
-      currentTeamId: team.id,
-      currentProjectId: null,
-      loading: true
-    });
-
-    try {
-      const [projects, tasks] = await Promise.all([
-        api.projects.listProjects(team.id),
-        api.projects.listTasks(undefined, team.id),
-      ]);
-      set({
-        projects,
-        tasks,
-        currentProjectId: projects[0]?.id ?? null,
-        loaded: true
-      });
-    } finally {
-      set({ loading: false });
-    }
-
     return team;
   },
   async createProject(p) {

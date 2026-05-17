@@ -19,6 +19,7 @@ export function EditTaskModal() {
   const close = useUIStore(s => s.close);
   const taskId = useUIStore(s => s.modalProps?.taskId) as string | undefined;
   const tasks = useProjectsStore(s => s.tasks);
+  const members = useProjectsStore(s => s.members);
   const update = useProjectsStore(s => s.update);
   const remove = useProjectsStore(s => s.remove);
   const task = tasks.find(t => t.id === taskId) as Task | undefined;
@@ -30,6 +31,7 @@ export function EditTaskModal() {
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("med");
   const [status, setStatus] = useState<TaskStatus>("todo");
+  const [assigneeId, setAssigneeId] = useState("unassigned");
 
   useEffect(() => {
     if (task) {
@@ -38,6 +40,7 @@ export function EditTaskModal() {
       setDue(task.dueDate ? task.dueDate.slice(0, 10) : "");
       setPriority(task.priority);
       setStatus(task.status);
+      setAssigneeId(task.assigneeId ?? "unassigned");
     }
   }, [task]);
 
@@ -53,6 +56,7 @@ export function EditTaskModal() {
         description,
         dueDate: due ? new Date(due).toISOString() : undefined,
         priority, status,
+        assigneeId: assigneeId === "unassigned" ? undefined : assigneeId,
       });
       toast.success(t("projects.taskUpdated"));
       close();
@@ -105,6 +109,20 @@ export function EditTaskModal() {
             <div className="grid gap-1.5">
               <Label htmlFor="t-due">{t("projects.form.due")}</Label>
               <Input id="t-due" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Responsable</Label>
+              <Select value={assigneeId} onValueChange={setAssigneeId}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Non assignée</SelectItem>
+                  {members.map(member => (
+                    <SelectItem key={member.userId} value={member.userId}>
+                      {member.name} · {member.role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter className="sm:justify-between">
               <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmDel(true)}>

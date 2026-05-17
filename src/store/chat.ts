@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/services";
+import { useNotificationsStore } from "@/store/notifications";
 import type { Channel, ChatMessage } from "@/services";
 
 interface ChatState {
@@ -25,12 +26,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   channels: [], dms: [], messages: {}, activeId: "", loaded: false,
   async fetchAll() {
     const [channels, dms] = await Promise.all([api.chat.listChannels(), api.chat.listDMs()]);
+    const allChannels = [...channels, ...dms];
     if (!channels.length && !dms.length) {
-      set({ channels, dms, activeId: "", loaded: true });
+      get().disconnect();
+      set({ channels, dms, messages: {}, activeId: "", loaded: true });
       return;
     }
     const activeId =
-      [...channels, ...dms].some(channel => channel.id === get().activeId)
+      allChannels.some(channel => channel.id === get().activeId)
         ? get().activeId
         : channels[0]?.id ?? dms[0]?.id ?? get().activeId;
     set({ channels, dms, activeId, loaded: true });
@@ -39,6 +42,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   async loadMessages(channelId, options) {
     if (!channelId) return;
+    const exists = [...get().channels, ...get().dms].some(channel => channel.id === channelId);
+    if (!exists) {
+      const nextActiveId = get().channels[0]?.id ?? get().dms[0]?.id ?? "";
+      set({ activeId: nextActiveId });
+      if (!nextActiveId) get().disconnect();
+      return;
+    }
     if (get().messages[channelId] && !options?.force) return;
     const list = await api.chat.listMessages(channelId);
     set({ messages: { ...get().messages, [channelId]: list } });
@@ -94,6 +104,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             : channel
         )
       });
+      if (!message.isYou) {
+        void useNotificationsStore.getState().fetch();
+      }
     });
   },
   disconnect() {

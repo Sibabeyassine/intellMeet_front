@@ -27,6 +27,7 @@ import type {
   Task,
   TaskStatus,
   Team,
+  TeamMember,
   TranscriptLine,
   User,
 } from "./types";
@@ -46,6 +47,9 @@ export interface MeetingsAPI {
   list(): Promise<Meeting[]>;
   get(id: ID): Promise<Meeting | null>;
   join(id: ID): Promise<Meeting>;
+  start(id: ID): Promise<Meeting>;
+  end(id: ID): Promise<Meeting>;
+  extend(id: ID, durationMin?: number): Promise<Meeting>;
   create(p: CreateMeetingPayload): Promise<Meeting>;
   update(id: ID, patch: Partial<Meeting>): Promise<Meeting>;
   delete(id: ID): Promise<void>;
@@ -58,8 +62,8 @@ export interface MeetingsAPI {
 
 export interface ProjectsAPI {
   listTeams(): Promise<Team[]>;
+  listTeamMembers(teamId: ID): Promise<TeamMember[]>;
   createTeam(p: CreateTeamPayload): Promise<Team>;
-  joinTeam(teamId: ID): Promise<Team>;
   inviteTeamMembers(teamId: ID, emails: string[]): Promise<void>;
   listProjects(teamId?: ID): Promise<Project[]>;
   createProject(p: CreateProjectPayload): Promise<Project>;

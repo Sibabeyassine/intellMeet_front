@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, Users2, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth, addMonths, subMonths } from "date-fns";
 import { AppShell } from "@/components/app/AppShell";
@@ -12,16 +12,14 @@ import { cn } from "@/lib/utils";
 import { useProjectsStore, useCurrentProject } from "@/store/projects";
 import { useUIStore } from "@/store/ui";
 import type { Task, TaskStatus } from "@/services";
-import { useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
 
 type ViewMode = "kanban" | "list" | "calendar";
 
 const Projects = () => {
   const { t, i18n } = useTranslation();
   const fetchAll = useProjectsStore(s => s.fetchAll);
-  const joinTeam = useProjectsStore(s => s.joinTeam);
   const teams = useProjectsStore(s => s.teams);
+  const members = useProjectsStore(s => s.members);
   const allProjects = useProjectsStore(s => s.projects);
   const allTasks = useProjectsStore(s => s.tasks);
   const setTeam = useProjectsStore(s => s.setTeam);
@@ -33,36 +31,29 @@ const Projects = () => {
     [allProjects, currentTeamId]
   );
   const project = useCurrentProject();
+  const memberById = useMemo(
+    () => new Map(members.map(member => [member.userId, member])),
+    [members]
+  );
   const tasks = useMemo(
-    () => allTasks.filter(tt => !currentProjectId || tt.projectId === currentProjectId),
-    [allTasks, currentProjectId]
+    () => allTasks
+      .filter(tt => !currentProjectId || tt.projectId === currentProjectId)
+      .map(task => {
+        const assignee = task.assigneeId ? memberById.get(task.assigneeId) : undefined;
+        return assignee
+          ? { ...task, assignees: [{ initials: assignee.initials, color: assignee.color }] }
+          : task;
+      }),
+    [allTasks, currentProjectId, memberById]
   );
   const move = useProjectsStore(s => s.move);
   const openModal = useUIStore(s => s.open);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const handledInviteRef = useRef<string | null>(null);
 
   const [view, setView] = useState<ViewMode>("kanban");
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
-
-  useEffect(() => {
-    const workspaceId = searchParams.get("workspaceId");
-    if (!workspaceId || handledInviteRef.current === workspaceId) return;
-    handledInviteRef.current = workspaceId;
-
-    void joinTeam(workspaceId)
-      .then((team) => {
-        toast.success(`Vous avez rejoint ${team.name}`);
-        setSearchParams({}, { replace: true });
-      })
-      .catch((error) => {
-        handledInviteRef.current = null;
-        toast.error(error instanceof Error ? error.message : "Lien d'invitation invalide");
-      });
-  }, [joinTeam, searchParams, setSearchParams]);
 
   const columns: { id: TaskStatus; label: string }[] = [
     { id: "backlog", label: t("projects.backlog") },
@@ -155,6 +146,24 @@ const Projects = () => {
             <Badge variant="outline" className="ml-1 gap-1">
               <Sparkles className="h-3 w-3 text-primary" /> {t("projects.aiBadge", { count: aiCount })}
             </Badge>
+            <div className="ml-1 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+              <Users2 className="h-3.5 w-3.5 text-muted-foreground" />
+              <div className="flex -space-x-1.5">
+                {members.slice(0, 5).map(member => (
+                  <div
+                    key={member.userId}
+                    className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-background text-[9px] font-semibold text-white"
+                    title={`${member.name} · ${member.role}`}
+                    style={{ backgroundColor: `hsl(${member.color})` }}
+                  >
+                    {member.initials}
+                  </div>
+                ))}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {members.length} {t("common.members")}
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
