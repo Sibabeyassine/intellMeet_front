@@ -48,6 +48,22 @@ type ApiResponse<T> = {
   errors?: unknown[];
 };
 
+type ApiErrorDetail = {
+  path?: string;
+  message?: string;
+};
+
+const isApiErrorDetail = (error: unknown): error is ApiErrorDetail =>
+  typeof error === "object" &&
+  error !== null &&
+  "message" in error &&
+  typeof (error as ApiErrorDetail).message === "string";
+
+const formatApiErrorMessage = (data: ApiResponse<unknown> | undefined, fallback: string): string => {
+  const detail = data?.errors?.find(isApiErrorDetail);
+  return detail?.message ?? data?.message ?? fallback;
+};
+
 type BackendUser = {
   id: string;
   email: string;
@@ -218,8 +234,10 @@ client.interceptors.response.use(
       notifySessionExpired();
     }
 
-    const message =
-      error.response?.data?.message ?? error.message ?? "API request failed";
+    const message = formatApiErrorMessage(
+      error.response?.data,
+      error.message ?? "API request failed"
+    );
     return Promise.reject(new Error(message));
   }
 );

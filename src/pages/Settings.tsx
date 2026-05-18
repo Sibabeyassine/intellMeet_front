@@ -42,6 +42,16 @@ const Settings = () => {
       return;
     }
 
+    if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      toast.error("Le nouveau mot de passe doit contenir au moins une minuscule, une majuscule et un chiffre.");
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      toast.error("Le nouveau mot de passe doit etre different de l'ancien.");
+      return;
+    }
+
     setPasswordLoading(true);
     try {
       await changePassword({ currentPassword, newPassword });
