@@ -50,6 +50,7 @@ export interface Meeting {
   id: ID;
   title: string;
   description?: string;
+  notes?: string;
   scheduledAt: ISODate;
   durationMin: number;
   status: MeetingStatus;

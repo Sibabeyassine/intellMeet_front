@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,15 @@ export function MeetingSidebar({ meetingId, meeting, summary, actionItems = [], 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [notes, setNotes] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const lastSavedNotesRef = useRef("");
+
+  useEffect(() => {
+    const nextNotes = meeting?.notes ?? "";
+    setNotes(nextNotes);
+    lastSavedNotesRef.current = nextNotes;
+  }, [meeting?.id, meeting?.notes]);
 
   useEffect(() => {
     if (!meetingId) {
@@ -63,11 +73,40 @@ export function MeetingSidebar({ meetingId, meeting, summary, actionItems = [], 
       });
     });
 
+    const unsubscribeMeeting = api.meetings.subscribe(meetingId, (event) => {
+      if (event.type !== "notes-updated") return;
+      const payload = event.payload as { meetingId?: string; notes?: string };
+      if (payload.meetingId !== meetingId || typeof payload.notes !== "string") return;
+      lastSavedNotesRef.current = payload.notes;
+      setNotes(payload.notes);
+    });
+
     return () => {
       alive = false;
       unsubscribe();
+      unsubscribeMeeting();
     };
   }, [meetingId]);
+
+  useEffect(() => {
+    if (!meetingId || notes === lastSavedNotesRef.current) return;
+
+    setNotesSaving(true);
+    const timer = window.setTimeout(() => {
+      void api.meetings.update(meetingId, { notes }).then((updatedMeeting) => {
+        lastSavedNotesRef.current = updatedMeeting.notes ?? notes;
+      }).catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Notes non sauvegardées");
+      }).finally(() => {
+        setNotesSaving(false);
+      });
+    }, 800);
+
+    return () => {
+      window.clearTimeout(timer);
+      setNotesSaving(false);
+    };
+  }, [meetingId, notes]);
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,6 +243,19 @@ export function MeetingSidebar({ meetingId, meeting, summary, actionItems = [], 
                 </p>
                 <h5 className="mt-4 font-display font-semibold text-foreground">Agenda</h5>
                 <p className="text-foreground/90">{meeting?.description || "Aucun agenda renseigné pour cette réunion."}</p>
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h5 className="font-display font-semibold text-foreground">Notes partagées</h5>
+                    <span className="text-[11px] text-muted-foreground">{notesSaving ? "Sauvegarde..." : "Synchronisées"}</span>
+                  </div>
+                  <Textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Ajoute les décisions, points à suivre ou informations importantes..."
+                    className="min-h-40 resize-none rounded-xl bg-background text-sm"
+                    maxLength={20000}
+                  />
+                </div>
                 <h5 className="mt-4 font-display font-semibold text-foreground">Décisions</h5>
                 {summary?.decisions?.length ? (
                   <ul className="ml-5 list-disc space-y-1 text-foreground/90">

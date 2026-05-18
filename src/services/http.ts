@@ -131,6 +131,7 @@ type BackendMeeting = {
   }>;
   recordingUrl?: string;
   transcript?: string;
+  notes?: string;
   summary?: string;
   actionItems?: Array<{ title: string; status: "todo" | "doing" | "done" }>;
 };
@@ -451,6 +452,7 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => {
     id: meeting.id,
     title: meeting.title,
     description: meeting.description,
+    notes: meeting.notes,
     scheduledAt: meeting.startsAt,
     durationMin: minutesBetween(meeting.startsAt, meeting.endsAt),
     status: mapMeetingStatus(meeting.status),
@@ -812,6 +814,7 @@ const meetings: MeetingsAPI = {
         title: patch.title,
         description: patch.description,
         startsAt: patch.scheduledAt,
+        notes: patch.notes,
         recordingUrl: patch.recordingUrl,
         status:
           patch.status === "ended"
@@ -865,8 +868,29 @@ const meetings: MeetingsAPI = {
       status: item.status === "doing" ? "in_progress" : item.status
     }));
   },
-  subscribe() {
-    return () => {};
+  subscribe(id, cb) {
+    const session = readSession();
+    if (!session?.accessToken) return () => {};
+
+    const socket: Socket = io(WS_URL, {
+      auth: { token: session.accessToken }
+    });
+
+    socket.on("connect", () => {
+      socket.emit("meeting:join", { meetingId: id });
+    });
+
+    socket.on("meeting:notes-updated", (payload: unknown) => {
+      cb({ type: "notes-updated", payload });
+    });
+
+    socket.on("realtime:error", (payload: { message?: string }) => {
+      if (payload.message) console.warn(payload.message);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }
 };
 
