@@ -58,6 +58,7 @@ export interface Meeting {
   participants: Participant[];
   inviteUrl: string;
   recordingUrl?: string;
+  transcript?: string;
   hasAISummary?: boolean;
 }
 

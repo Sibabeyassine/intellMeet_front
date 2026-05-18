@@ -65,6 +65,7 @@ export interface ProjectsAPI {
   listTeamMembers(teamId: ID): Promise<TeamMember[]>;
   createTeam(p: CreateTeamPayload): Promise<Team>;
   inviteTeamMembers(teamId: ID, emails: string[]): Promise<void>;
+  acceptTeamInvite(token: string): Promise<Team>;
   listProjects(teamId?: ID): Promise<Project[]>;
   createProject(p: CreateProjectPayload): Promise<Project>;
   listTasks(projectId?: ID, teamId?: ID): Promise<Task[]>;

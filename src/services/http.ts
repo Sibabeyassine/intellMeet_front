@@ -133,7 +133,12 @@ type BackendMeeting = {
   transcript?: string;
   notes?: string;
   summary?: string;
-  actionItems?: Array<{ title: string; status: "todo" | "doing" | "done" }>;
+  actionItems?: Array<{
+    title: string;
+    assigneeId?: string;
+    status: "todo" | "doing" | "done";
+    dueDate?: string;
+  }>;
 };
 
 type BackendNotification = {
@@ -466,6 +471,7 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => {
     })),
     inviteUrl: `/meeting/${meeting.id}`,
     recordingUrl: meeting.recordingUrl,
+    transcript: meeting.transcript,
     hasAISummary: Boolean(meeting.summary)
   };
 };
@@ -664,14 +670,19 @@ const projects: ProjectsAPI = {
     return mapTeam(workspace);
   },
   async inviteTeamMembers(teamId, emails) {
-    await Promise.all(
-      emails.map((email) =>
-        client.post(`/workspaces/${teamId}/members`, {
-          email,
-          role: "member"
-        })
-      )
+    await unwrap<{ invites: Array<{ id: string; email: string; inviteUrl: string }> }>(
+      client.post(`/workspaces/${teamId}/invites`, {
+        emails,
+        role: "member"
+      })
     );
+  },
+  async acceptTeamInvite(token) {
+    const data = await unwrap<{ workspace: BackendWorkspace }>(
+      client.post(`/workspaces/invites/${token}/accept`)
+    );
+    setActiveWorkspaceId(data.workspace.id);
+    return mapTeam(data.workspace);
   },
   async listProjects(teamId) {
     const workspaceId = teamId ?? await ensureWorkspaceId();
@@ -815,6 +826,7 @@ const meetings: MeetingsAPI = {
         description: patch.description,
         startsAt: patch.scheduledAt,
         notes: patch.notes,
+        transcript: patch.transcript,
         recordingUrl: patch.recordingUrl,
         status:
           patch.status === "ended"
@@ -861,10 +873,10 @@ const meetings: MeetingsAPI = {
       id: `${id}_action_${index}`,
       meetingId: id,
       title: item.title,
-      assignee: "Equipe",
-      initials: "EQ",
-      color: "152 70% 45%",
-      due: "A planifier",
+      assignee: meeting.participants?.find((participant) => participant.id === item.assigneeId)?.name ?? "Equipe",
+      initials: initialsFor(meeting.participants?.find((participant) => participant.id === item.assigneeId)?.name ?? "Equipe"),
+      color: item.assigneeId ? colorFor(item.assigneeId) : "152 70% 45%",
+      due: item.dueDate ? new Date(item.dueDate).toLocaleDateString("fr-FR") : "A planifier",
       status: item.status === "doing" ? "in_progress" : item.status
     }));
   },
@@ -882,6 +894,10 @@ const meetings: MeetingsAPI = {
 
     socket.on("meeting:notes-updated", (payload: unknown) => {
       cb({ type: "notes-updated", payload });
+    });
+
+    socket.on("meeting:transcript-updated", (payload: unknown) => {
+      cb({ type: "transcript-updated", payload });
     });
 
     socket.on("realtime:error", (payload: { message?: string }) => {

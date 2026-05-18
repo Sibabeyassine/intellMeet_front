@@ -24,6 +24,8 @@ type Meeting = {
   title: string;
   date: string;
   duration: string;
+  status: ApiMeeting["status"];
+  statusLabel: string;
   participants: number;
   color: string;
   tags: string[];
@@ -49,19 +51,157 @@ const summaryText = (meeting: ApiMeeting, details?: MeetingDetails) => {
     "Aucun resume IA disponible pour cette reunion. Lance l'analyse IA depuis le backend pour generer un summary.";
 };
 
+const formatMeetingDate = (value: string) =>
+  new Date(value).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+const formatDuration = (meeting: ApiMeeting) => {
+  if (meeting.status === "scheduled") return `${meeting.durationMin} min prévues`;
+  if (meeting.durationMin > 480) return "Durée non clôturée";
+  return `${meeting.durationMin} min`;
+};
+
+const statusLabel = (status: ApiMeeting["status"]) => {
+  if (status === "live") return "En direct";
+  if (status === "scheduled") return "Planifiée";
+  return "Terminée";
+};
+
+const pdfEscape = (value: string) =>
+  value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E\n]/g, "");
+
+const wrapPdfText = (text: string, maxChars = 88) => {
+  const lines: string[] = [];
+
+  text.split("\n").forEach((rawLine) => {
+    const words = rawLine.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      lines.push("");
+      return;
+    }
+
+    let line = "";
+    words.forEach((word) => {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length > maxChars) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    });
+    if (line) lines.push(line);
+  });
+
+  return lines;
+};
+
+const buildMeetingPdf = (meeting: Meeting) => {
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const margin = 48;
+  const lineHeight = 16;
+  const bottomMargin = 54;
+  const commands: string[] = [];
+  let pageCount = 1;
+  let y = pageHeight - margin;
+
+  const newPage = () => {
+    commands.push("ET");
+    commands.push("%%PAGE_BREAK%%");
+    commands.push("BT");
+    commands.push("/F1 11 Tf");
+    y = pageHeight - margin;
+    pageCount += 1;
+  };
+
+  const writeLine = (text = "", size = 11, offset = 0) => {
+    if (y < bottomMargin) newPage();
+    commands.push(`/F1 ${size} Tf`);
+    commands.push(`${margin + offset} ${y} Td (${pdfEscape(text)}) Tj`);
+    commands.push(`${-(margin + offset)} ${-lineHeight} Td`);
+    y -= lineHeight;
+  };
+
+  const writeBlock = (title: string, lines: string[]) => {
+    y -= 8;
+    writeLine(title.toUpperCase(), 12);
+    lines.forEach((line) => writeLine(line, 10));
+  };
+
+  commands.push("BT");
+  commands.push("/F1 18 Tf");
+  commands.push(`${margin} ${y} Td (${pdfEscape("IntellMeet - Compte rendu de reunion")}) Tj`);
+  y -= 26;
+  commands.push(`0 -26 Td`);
+  writeLine(meeting.title, 16);
+  writeLine(`${meeting.statusLabel} | ${meeting.date} | ${meeting.duration} | ${meeting.participants} participants`, 10);
+  writeBlock("Resume IA", wrapPdfText(meeting.summary || "Aucun resume disponible."));
+  writeBlock("Points cles", meeting.highlights.length ? meeting.highlights.flatMap((item) => wrapPdfText(`- ${item}`)) : ["- Aucun"]);
+  writeBlock("Decisions", meeting.decisions.length ? meeting.decisions.flatMap((item) => wrapPdfText(`- ${item}`)) : ["- Aucune"]);
+  writeBlock("Actions", meeting.actions.length ? meeting.actions.flatMap((item) => wrapPdfText(`- ${item.title} (${item.assignee})`)) : ["- Aucune"]);
+  writeBlock("Transcription", meeting.transcript.length ? meeting.transcript.flatMap((item) => wrapPdfText(`${item.time} ${item.author}: ${item.text}`, 82)) : ["Aucune transcription disponible."]);
+  commands.push("ET");
+
+  const pageStreams = commands
+    .join("\n")
+    .split("%%PAGE_BREAK%%")
+    .map((content) => content.trim());
+  const objects: string[] = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids ${pageStreams.map((_, index) => `${3 + index * 2} 0 R`).join(" ")} /Count ${pageCount} >>`
+  ];
+
+  pageStreams.forEach((stream, index) => {
+    const pageObjectId = 3 + index * 2;
+    const streamObjectId = pageObjectId + 1;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${3 + pageStreams.length * 2} 0 R >> >> /Contents ${streamObjectId} 0 R >>`);
+    objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+  });
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+
+  const chunks = ["%PDF-1.4\n"];
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(chunks.join("").length);
+    chunks.push(`${index + 1} 0 obj\n${object}\nendobj\n`);
+  });
+  const xrefOffset = chunks.join("").length;
+  chunks.push(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
+  offsets.slice(1).forEach((offset) => {
+    chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`);
+  });
+  chunks.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+  return new Blob([chunks.join("")], { type: "application/pdf" });
+};
+
 const mapApiMeeting = (meeting: ApiMeeting, index: number, details?: MeetingDetails): Meeting => ({
   id: meeting.id,
   title: meeting.title,
-  date: new Date(meeting.scheduledAt).toLocaleString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }),
-  duration: `${meeting.durationMin} min`,
+  date: formatMeetingDate(meeting.scheduledAt),
+  duration: formatDuration(meeting),
+  status: meeting.status,
+  statusLabel: statusLabel(meeting.status),
   participants: meeting.participants.length || 1,
   color: COLORS[index % COLORS.length],
-  tags: meeting.hasAISummary ? ["ai", "summary"] : ["meeting"],
+  tags: [
+    statusLabel(meeting.status).toLowerCase(),
+    ...(meeting.hasAISummary ? ["ia", "résumé"] : ["réunion"])
+  ],
   summary: summaryText(meeting, details),
   highlights: details?.summary?.highlights ?? [],
   decisions: details?.summary?.decisions ?? [],
@@ -93,6 +233,7 @@ const AIMeetings = () => {
   const [confirmDel, setConfirmDel] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const selected = meetings.find(m => m.id === selectedId) ?? meetings[0];
+  const selectedIsJoinable = selected?.status === "live" || selected?.status === "scheduled";
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
@@ -156,27 +297,11 @@ const AIMeetings = () => {
 
   const handleExport = () => {
     if (!selected) return;
-    const content = [
-      selected.title,
-      `${selected.date} · ${selected.duration}`,
-      "",
-      "Résumé",
-      selected.summary,
-      "",
-      "Points clés",
-      ...(selected.highlights.length ? selected.highlights.map((item) => `- ${item}`) : ["- Aucun"]),
-      "",
-      "Décisions",
-      ...(selected.decisions.length ? selected.decisions.map((item) => `- ${item}`) : ["- Aucune"]),
-      "",
-      "Actions",
-      ...(selected.actions.length ? selected.actions.map((item) => `- ${item.title} (${item.assignee})`) : ["- Aucune"])
-    ].join("\n");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const blob = buildMeetingPdf(selected);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${selected.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-resume.txt`;
+    link.download = `${selected.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-compte-rendu.pdf`;
     link.click();
     URL.revokeObjectURL(url);
     toast.success(t("meetings.exported"));
@@ -245,7 +370,8 @@ const AIMeetings = () => {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-foreground">{m.title}</p>
-                        <p className="text-[11px] text-muted-foreground">{m.date} · {m.duration}</p>
+                        <p className="text-[11px] text-muted-foreground">{m.statusLabel} · {m.date}</p>
+                        <p className="text-[11px] text-muted-foreground">{m.duration}</p>
                         <div className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
                           <span className="flex items-center gap-1"><Users2 className="h-3 w-3" />{m.participants}</span>
                           <span className="flex items-center gap-1"><ListChecks className="h-3 w-3" />{m.actions.length}</span>
@@ -279,17 +405,23 @@ const AIMeetings = () => {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button variant="hero" size="sm" className="gap-2" onClick={handleExport}>
-                  <Download className="h-4 w-4" /> {t("meetings.exportPdf")}
+                  <Download className="h-4 w-4" /> Exporter le compte rendu
                 </Button>
                 <Button variant="outline" size="sm" className="gap-2" onClick={handleAnalyze} disabled={analyzing}>
-                  <Sparkles className="h-4 w-4" /> {analyzing ? "Analyse..." : "Analyser IA"}
+                  <Sparkles className="h-4 w-4" /> {analyzing ? "Analyse..." : "Générer le résumé IA"}
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/meeting/${selected.id}`); toast(t("meetings.linkCopied")); }}>
-                  <Share2 className="h-4 w-4" /> {t("meetings.share")}
-                </Button>
-                <Button asChild variant="ghost" size="sm" className="gap-2 text-muted-foreground">
-                  <Link to={`/meeting/${selected.id}`}><Video className="h-4 w-4" /> {t("meetings.rejoin")}</Link>
-                </Button>
+                {selectedIsJoinable && (
+                  <>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/meeting/${selected.id}`); toast(t("meetings.linkCopied")); }}>
+                      <Share2 className="h-4 w-4" /> Copier le lien de salle
+                    </Button>
+                    <Button asChild variant={selected.status === "live" ? "outline" : "ghost"} size="sm" className="gap-2 text-muted-foreground">
+                      <Link to={`/meeting/${selected.id}`}>
+                        <Video className="h-4 w-4" /> {selected.status === "live" ? "Rejoindre la réunion" : "Ouvrir la salle"}
+                      </Link>
+                    </Button>
+                  </>
+                )}
                 <Button variant="ghost" size="sm" className="gap-2 text-destructive hover:text-destructive ml-auto" onClick={() => setConfirmDel(true)}>
                   <Trash2 className="h-4 w-4" /> {t("common.delete")}
                 </Button>

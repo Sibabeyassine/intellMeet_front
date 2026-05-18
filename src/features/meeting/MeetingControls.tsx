@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Mic, MicOff, MoreHorizontal, PhoneOff, ScreenShare, Video, VideoOff, MessageSquare, Sparkles, Hand, CircleDot, Settings } from "lucide-react";
+import { Captions, Mic, MicOff, MoreHorizontal, PhoneOff, ScreenShare, Video, VideoOff, MessageSquare, Sparkles, Hand, CircleDot, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,8 @@ interface Props {
   recordingSeconds: number;
   recordingSaving?: boolean;
   onToggleRecording: () => void;
+  transcribing: boolean;
+  onToggleTranscription: () => void;
   onLeave: () => void;
 }
 
@@ -37,6 +39,8 @@ export function MeetingControls({
   recordingSeconds,
   recordingSaving,
   onToggleRecording,
+  transcribing,
+  onToggleTranscription,
   onLeave
 }: Props) {
   const { t } = useTranslation();
@@ -80,6 +84,13 @@ export function MeetingControls({
           disabled={recordingSaving}
         >
           <CircleDot className="h-5 w-5" />
+        </CtrlBtn>
+        <CtrlBtn
+          label={transcribing ? "Arrêter la transcription" : "Transcrire"}
+          active={transcribing}
+          onClick={onToggleTranscription}
+        >
+          <Captions className="h-5 w-5" />
         </CtrlBtn>
         <CtrlBtn label={t("common.actions")} active={hand} onClick={() => setHand(h => !h)}>
           <Hand className="h-5 w-5" />

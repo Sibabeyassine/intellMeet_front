@@ -19,8 +19,24 @@ import { toast } from "sonner";
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8000";
 const SESSION_KEY = "intellmeet.http.session";
+const parseIceServers = (): RTCIceServer[] => {
+  const value = import.meta.env.VITE_RTC_ICE_SERVERS;
+  if (!value) return [{ urls: "stun:stun.l.google.com:19302" }];
+
+  try {
+    const parsed = JSON.parse(value) as RTCIceServer[];
+    return Array.isArray(parsed) && parsed.length ? parsed : [{ urls: "stun:stun.l.google.com:19302" }];
+  } catch {
+    return value
+      .split(",")
+      .map((url) => url.trim())
+      .filter(Boolean)
+      .map((url) => ({ urls: url }));
+  }
+};
 const rtcConfig: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  iceServers: parseIceServers(),
+  iceCandidatePoolSize: 10
 };
 
 type RemoteParticipant = Participant & {
@@ -40,6 +56,34 @@ type MediaStatePayload = {
   cameraOn: boolean;
   screenSharing: boolean;
 };
+
+type SpeechRecognitionConstructor = new () => SpeechRecognition;
+type SpeechRecognitionEvent = Event & {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+};
+
+type SpeechRecognitionErrorEvent = Event & {
+  error?: string;
+};
+
+type SpeechRecognition = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
 
 const readAccessToken = () => {
   try {
@@ -84,7 +128,10 @@ const MeetingRoom = () => {
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordingSaving, setRecordingSaving] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const transcriptTextRef = useRef("");
   const recordedChunksRef = useRef<BlobPart[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
@@ -129,6 +176,16 @@ const MeetingRoom = () => {
   useEffect(() => {
     mediaStateRef.current = { micOn, cameraOn, screenSharing };
   }, [cameraOn, micOn, screenSharing]);
+
+  const transcriptLineFromText = (text: string, authorName = "Transcription"): TranscriptLine => ({
+    id: `${meetingId ?? "meeting"}_transcript_live`,
+    meetingId: meetingId ?? "",
+    authorName,
+    initials: initialsFor(authorName),
+    color: "221 83% 53%",
+    time: "Live",
+    text
+  });
 
   const ensureLocalStream = async () => {
     if (localStream) return localStream;
@@ -185,6 +242,7 @@ const MeetingRoom = () => {
       if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
       recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      recognitionRef.current?.stop();
       socketRef.current?.disconnect();
       Object.values(peersRef.current).forEach((peer) => peer.close());
       screenTrackRef.current?.stop();
@@ -207,10 +265,7 @@ const MeetingRoom = () => {
     setActionItems([]);
     setSuggestions([]);
     void (async () => {
-      let loadedMeeting = await api.meetings.join(id).catch(() => api.meetings.get(id));
-      if (loadedMeeting?.status === "scheduled" && loadedMeeting.hostId === user?.id) {
-        loadedMeeting = await api.meetings.start(id).catch(() => loadedMeeting);
-      }
+      const loadedMeeting = await api.meetings.join(id).catch(() => api.meetings.get(id));
       if (!alive || !loadedMeeting) return;
       setMeeting(loadedMeeting);
       setSessionExpired(false);
@@ -223,6 +278,7 @@ const MeetingRoom = () => {
       ]);
       if (!alive) return;
       setSummary(loadedSummary);
+      transcriptTextRef.current = loadedTranscript.map((line) => line.text).join("\n");
       setTranscript(loadedTranscript);
       setActionItems(loadedActions);
       setSuggestions(loadedSuggestions);
@@ -350,6 +406,12 @@ const MeetingRoom = () => {
             : participant
         )
       );
+    });
+
+    socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
+      if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
+      transcriptTextRef.current = payload.transcript;
+      setTranscript(payload.transcript ? [transcriptLineFromText(payload.transcript, payload.updatedBy?.name ?? "Transcription")] : []);
     });
 
     socket.on("meeting:signal", async (payload: RealtimeSignal) => {
@@ -695,6 +757,80 @@ const MeetingRoom = () => {
     void startRecording();
   };
 
+  const appendTranscript = (text: string) => {
+    if (!meeting?.id || !text.trim()) return;
+
+    const nextTranscript = [transcriptTextRef.current, text.trim()]
+      .filter(Boolean)
+      .join("\n");
+    transcriptTextRef.current = nextTranscript;
+    setTranscript([transcriptLineFromText(nextTranscript, user?.fullName ?? "Transcription")]);
+    void api.meetings.update(meeting.id, {
+      transcript: nextTranscript
+    }).catch((error) => {
+      toast.error(error instanceof Error ? error.message : "Transcription non sauvegardée");
+    });
+  };
+
+  const stopTranscription = () => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setTranscribing(false);
+  };
+
+  const startTranscription = () => {
+    if (!meeting?.id) {
+      toast.error("Ouvre une réunion avant de lancer la transcription");
+      return;
+    }
+
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      toast.error("La transcription navigateur n'est pas supportée ici. Essaie Chrome ou Edge.");
+      return;
+    }
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "fr-FR";
+    recognitionRef.current = recognition;
+
+    recognition.onresult = (event) => {
+      let finalText = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result.isFinal) {
+          finalText += `${result[0]?.transcript ?? ""} `;
+        }
+      }
+      if (finalText.trim()) appendTranscript(finalText);
+    };
+    recognition.onerror = (event) => {
+      toast.error(event.error ? `Transcription: ${event.error}` : "Transcription interrompue");
+    };
+    recognition.onend = () => {
+      setTranscribing(false);
+      recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      setTranscribing(true);
+      toast.success("Transcription lancée");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Impossible de lancer la transcription");
+    }
+  };
+
+  const toggleTranscription = () => {
+    if (transcribing) {
+      stopTranscription();
+      return;
+    }
+    startTranscription();
+  };
+
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
       {/* Top bar */}
@@ -776,6 +912,8 @@ const MeetingRoom = () => {
               recordingSeconds={recordingSeconds}
               recordingSaving={recordingSaving}
               onToggleRecording={toggleRecording}
+              transcribing={transcribing}
+              onToggleTranscription={toggleTranscription}
               onLeave={leaveMeeting}
             />
           </div>
