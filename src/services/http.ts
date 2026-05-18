@@ -281,13 +281,18 @@ const getValidSession = async (): Promise<Session | null> => {
   const session = readSession();
   if (!session) return null;
 
-  if (session.refreshToken) {
-    return refreshSession();
+  const expiresAt = new Date(session.expiresAt).getTime();
+  const hasUsableAccessToken =
+    Number.isFinite(expiresAt) && expiresAt - Date.now() > 60 * 1000;
+
+  if (hasUsableAccessToken) {
+    return session;
   }
 
-  const expiresAt = new Date(session.expiresAt).getTime();
-  const shouldRefresh = !Number.isFinite(expiresAt) || expiresAt - Date.now() < 60 * 1000;
-  if (!shouldRefresh) return session;
+  if (!session.refreshToken) {
+    saveSession(null);
+    return null;
+  }
 
   return refreshSession();
 };
@@ -454,7 +459,14 @@ const mapNotification = (notification: BackendNotification): Notification => {
     id: notification.id,
     title: notification.title,
     body: notification.message,
-    href: meetingId ? `/meeting/${meetingId}` : workspaceId ? "/projects" : "/dashboard",
+    href:
+      notification.type === "chat_message"
+        ? undefined
+        : meetingId
+          ? `/meeting/${meetingId}`
+          : workspaceId
+            ? "/projects"
+            : "/dashboard",
     read: Boolean(notification.readAt),
     createdAt: notification.createdAt,
     kind:
@@ -599,7 +611,7 @@ const auth: AuthAPI = {
     return mapUser(user);
   },
   async changePassword(payload) {
-    await client.post("/auth/change-password", payload);
+    await client.patch("/auth/change-password", payload);
   }
 };
 

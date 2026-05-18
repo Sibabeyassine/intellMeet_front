@@ -31,7 +31,8 @@ const Settings = () => {
   const save = () => toast.success(t("settings.saved"));
   const submitPassword = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const currentPassword = String(form.get("currentPassword") ?? "");
     const newPassword = String(form.get("newPassword") ?? "");
     const confirmPassword = String(form.get("confirmPassword") ?? "");
@@ -44,9 +45,11 @@ const Settings = () => {
     setPasswordLoading(true);
     try {
       await changePassword({ currentPassword, newPassword });
-      toast.success("Mot de passe mis à jour");
+      formElement.reset();
       setPasswordOpen(false);
-      event.currentTarget.reset();
+      toast.success("Mot de passe mis à jour. Reconnecte-toi pour continuer.");
+      await logout();
+      navigate("/login", { replace: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Impossible de changer le mot de passe");
     } finally {

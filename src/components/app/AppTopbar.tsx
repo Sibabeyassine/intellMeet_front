@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Sparkles, Calendar, AtSign, CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import type { Notification } from "@/services";
 
 interface Props {
@@ -30,12 +31,18 @@ const iconFor = (kind: Notification["kind"]) =>
           : CheckCircle2;
 
 export function AppTopbar({ title, description, actions }: Props) {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const openModal = useUIStore(s => s.open);
   const notifs = useNotificationsStore(s => s.list);
-  const markRead = useNotificationsStore(s => s.markRead);
   const markAllRead = useNotificationsStore(s => s.markAllRead);
   const unread = useUnreadCount();
   const { t } = useTranslation();
+  const handleNotificationsOpenChange = (open: boolean) => {
+    setNotificationsOpen(open);
+    if (open && unread > 0) {
+      void markAllRead();
+    }
+  };
 
   return (
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border bg-background/80 px-6 backdrop-blur-xl">
@@ -61,7 +68,7 @@ export function AppTopbar({ title, description, actions }: Props) {
       <div className="flex items-center gap-2">
         {actions}
 
-        <Popover>
+        <Popover open={notificationsOpen} onOpenChange={handleNotificationsOpenChange}>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="icon" className="relative" aria-label={t("topbar.notifications")}>
               <Bell className="h-[18px] w-[18px]" />
@@ -85,27 +92,31 @@ export function AppTopbar({ title, description, actions }: Props) {
               )}
               {notifs.map(n => {
                 const Icon = iconFor(n.kind);
+                const itemClassName = cn(
+                  "flex items-start gap-3 px-4 py-3 transition",
+                  n.kind === "message" ? "cursor-default" : "hover:bg-muted/40",
+                  !n.read && "bg-primary/5"
+                );
+                const content = (
+                  <>
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Icon className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{n.title}</p>
+                      <p className="line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
+                    </div>
+                    {!n.read && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+                  </>
+                );
+
                 return (
                   <li key={n.id}>
-                    <Link
-                      to={n.href ?? "#"}
-                      onClick={() => {
-                        if (!n.read) void markRead(n.id);
-                      }}
-                      className={cn(
-                        "flex items-start gap-3 px-4 py-3 transition hover:bg-muted/40",
-                        !n.read && "bg-primary/5"
-                      )}
-                    >
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                        <Icon className="h-3.5 w-3.5" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-foreground">{n.title}</p>
-                        <p className="line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
-                      </div>
-                      {!n.read && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
-                    </Link>
+                    {n.kind === "message" || !n.href ? (
+                      <div className={itemClassName}>{content}</div>
+                    ) : (
+                      <Link to={n.href} className={itemClassName}>{content}</Link>
+                    )}
                   </li>
                 );
               })}

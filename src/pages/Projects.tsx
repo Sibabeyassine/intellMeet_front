@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useProjectsStore, useCurrentProject } from "@/store/projects";
 import { useUIStore } from "@/store/ui";
-import type { Task, TaskStatus } from "@/services";
+import type { Task, TaskStatus, Team } from "@/services";
 
 type ViewMode = "kanban" | "list" | "calendar";
 
@@ -26,6 +26,10 @@ const Projects = () => {
   const setProject = useProjectsStore(s => s.setProject);
   const currentTeamId = useProjectsStore(s => s.currentTeamId);
   const currentProjectId = useProjectsStore(s => s.currentProjectId);
+  const currentTeam = useMemo(
+    () => teams.find(team => team.id === currentTeamId) ?? null,
+    [currentTeamId, teams]
+  );
   const teamProjects = useMemo(
     () => allProjects.filter(p => p.teamId === currentTeamId),
     [allProjects, currentTeamId]
@@ -50,6 +54,7 @@ const Projects = () => {
   const openModal = useUIStore(s => s.open);
 
   const [view, setView] = useState<ViewMode>("kanban");
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<TaskStatus | null>(null);
 
@@ -71,9 +76,16 @@ const Projects = () => {
   };
 
   const aiCount = tasks.filter(t => t.fromAI).length;
-  const subtitle = project
+  const subtitle = !workspaceOpen
+    ? "Sélectionne une équipe pour ouvrir ses projets et son tableau de tâches."
+    : project
     ? `${teams.find(tm => tm.id === currentTeamId)?.name ?? ""} · ${project.name} · ${tasks.length} ${t("projects.activeTasks")}`
     : t("projects.subtitle", { count: tasks.length });
+
+  const openTeamWorkspace = (teamId: string) => {
+    setTeam(teamId);
+    setWorkspaceOpen(true);
+  };
 
   return (
     <AppShell>
@@ -82,20 +94,45 @@ const Projects = () => {
         description={subtitle}
         actions={
           <div className="flex items-center gap-2">
-            <Button onClick={() => openModal("invite")} variant="outline" size="sm" className="gap-2 hidden sm:inline-flex">
-              <UserPlus className="h-4 w-4" />{t("modals.invite.title")}
-            </Button>
-            <Button onClick={() => openModal("new-task")} variant="hero" size="sm" className="gap-2">
-              <Plus className="h-4 w-4" />{t("projects.newTask")}
-            </Button>
+            {!workspaceOpen ? (
+              <Button onClick={() => openModal("new-team")} variant="hero" size="sm" className="gap-2">
+                <Plus className="h-4 w-4" />{t("modals.newTeam.title")}
+              </Button>
+            ) : (
+              <>
+                <Button onClick={() => openModal("invite")} variant="outline" size="sm" className="gap-2 hidden sm:inline-flex">
+                  <UserPlus className="h-4 w-4" />{t("modals.invite.title")}
+                </Button>
+                <Button onClick={() => openModal("new-task")} variant="hero" size="sm" className="gap-2">
+                  <Plus className="h-4 w-4" />{t("projects.newTask")}
+                </Button>
+              </>
+            )}
           </div>
         }
       />
 
       <div className="flex-1 overflow-hidden flex flex-col">
+        {!workspaceOpen ? (
+          <TeamsOverview
+            teams={teams}
+            onOpen={openTeamWorkspace}
+            onCreate={() => openModal("new-team")}
+          />
+        ) : (
+        <>
         {/* Sub bar — team / project switcher + view toggle */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card/40 px-6 py-3">
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => setWorkspaceOpen(false)}
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Équipes
+            </Button>
             <Select value={currentTeamId ?? undefined} onValueChange={setTeam}>
               <SelectTrigger className="h-9 w-[170px]"><SelectValue placeholder={t("projects.selectTeam")} /></SelectTrigger>
               <SelectContent>
@@ -164,6 +201,11 @@ const Projects = () => {
                 {members.length} {t("common.members")}
               </span>
             </div>
+            {currentTeam && (
+              <Badge variant="secondary" className="hidden h-9 rounded-lg px-3 sm:inline-flex">
+                {currentTeam.memberCount ?? members.length} membres
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
@@ -230,10 +272,84 @@ const Projects = () => {
           {view === "list" && <ListView tasks={tasks} onOpen={(id) => openModal("edit-task", { taskId: id })} />}
           {view === "calendar" && <CalendarView tasks={tasks} locale={i18n.language} onOpen={(id) => openModal("edit-task", { taskId: id })} />}
         </div>
+        </>
+        )}
       </div>
     </AppShell>
   );
 };
+
+function TeamsOverview({ teams, onOpen, onCreate }: { teams: Team[]; onOpen: (id: string) => void; onCreate: () => void }) {
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-6xl space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-lg font-semibold text-foreground">Tes équipes</h2>
+            <p className="text-sm text-muted-foreground">
+              Ouvre une équipe pour gérer ses projets, ses membres et ses tâches.
+            </p>
+          </div>
+          <Button onClick={onCreate} variant="outline" className="gap-2">
+            <Plus className="h-4 w-4" />
+            Nouvelle équipe
+          </Button>
+        </div>
+
+        {teams.length ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {teams.map((team) => (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => onOpen(team.id)}
+                className="group rounded-2xl border border-border bg-card p-5 text-left shadow-elev-sm transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-elev-md"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white"
+                      style={{ backgroundColor: `hsl(${team.color})` }}
+                    >
+                      {team.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="truncate font-display text-base font-semibold text-foreground">
+                        {team.name}
+                      </h3>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {team.memberCount ?? 0} membres
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="mt-2 h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary" />
+                </div>
+                <div className="mt-5 flex items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
+                  <span>Espace de travail</span>
+                  <span>Ouvrir</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex min-h-[360px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/40 p-8 text-center">
+            <Users2 className="h-10 w-10 text-muted-foreground" />
+            <h3 className="mt-4 font-display text-lg font-semibold text-foreground">
+              Aucune équipe créée
+            </h3>
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Crée d’abord une équipe. Ensuite tu pourras ouvrir son espace, créer des projets et assigner des tâches.
+            </p>
+            <Button onClick={onCreate} variant="hero" className="mt-5 gap-2">
+              <Plus className="h-4 w-4" />
+              Créer une équipe
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ---------- Task Card ----------
 function TaskCard({ task, draggingId, setDraggingId, setOverCol, onClick }: { task: Task; draggingId: string | null; setDraggingId: (id: string | null) => void; setOverCol: (s: TaskStatus | null) => void; onClick: () => void; }) {

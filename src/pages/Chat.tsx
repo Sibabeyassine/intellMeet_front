@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useChatStore } from "@/store/chat";
 import { useUIStore } from "@/store/ui";
 import { Hash, Plus, Search, Send, Smile, Paperclip, Phone, Video, Info, Pin, Sparkles } from "lucide-react";
@@ -14,6 +15,8 @@ import type { Channel, ChatMessage } from "@/services";
 
 const Chat = () => {
   const { t } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
   const channelsLive = useChatStore(s => s.channels);
   const dmsLive = useChatStore(s => s.dms);
   const messagesMap = useChatStore(s => s.messages);
@@ -24,8 +27,28 @@ const Chat = () => {
   const refreshActive = useChatStore(s => s.refreshActive);
   const disconnectChat = useChatStore(s => s.disconnect);
   const openModal = useUIStore(s => s.open);
+  const targetChannelId = useMemo(
+    () => new URLSearchParams(location.search).get("channel"),
+    [location.search]
+  );
 
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    void fetchAll().catch(() => undefined);
+  }, [fetchAll]);
+  useEffect(() => {
+    if (!targetChannelId) return;
+
+    const exists = [...channelsLive, ...dmsLive].some((channel) => channel.id === targetChannelId);
+    if (!exists) {
+      if (channelsLive.length || dmsLive.length) {
+        navigate("/chat", { replace: true });
+      }
+      return;
+    }
+
+    setActive(targetChannelId);
+    navigate("/chat", { replace: true });
+  }, [channelsLive, dmsLive, navigate, setActive, targetChannelId]);
   useEffect(() => {
     const interval = window.setInterval(() => {
       void refreshActive();
