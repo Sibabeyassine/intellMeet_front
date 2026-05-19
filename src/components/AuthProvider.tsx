@@ -47,6 +47,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       void useProjectsStore.getState().fetchAll();
       void fetchNotifs();
     });
+    socket.on("workspace:tasks-updated", () => {
+      void useProjectsStore.getState().fetchAll();
+      void fetchNotifs();
+    });
 
     return () => {
       socket.disconnect();
