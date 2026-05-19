@@ -127,6 +127,7 @@ export interface Project {
   key: string;              // short code shown on cards (e.g. "Q2")
   color: string;
   description?: string;
+  resources?: ProjectResource[];
   createdAt: ISODate;
 }
 
@@ -167,6 +168,7 @@ export interface CreateTaskPayload {
 
 export interface CreateTeamPayload   { name: string; color?: string; }
 export interface CreateProjectPayload { teamId: ID; name: string; key?: string; color?: string; description?: string; }
+export interface AddProjectResourcePayload { projectId: ID; name: string; url: string; kind?: ProjectResourceKind; }
 
 // ---------- CHAT ----------
 export type ChannelKind = "channel" | "dm";

@@ -5,8 +5,7 @@
 // ============================================================
 
 import type {
-  ActionItem,
-  AISuggestion,
+  ActionItem, AISuggestion,
   Channel,
   ChatMessage,
   CreateMeetingPayload,
@@ -16,9 +15,9 @@ import type {
   DashboardOverview,
   ID,
   LoginPayload,
+  MediaFile,
   Meeting,
   MeetingSummary,
-  MediaFile,
   Notification,
   Project,
   RegisterPayload,
@@ -29,7 +28,7 @@ import type {
   Team,
   TeamMember,
   TranscriptLine,
-  User,
+  User
 } from "./types";
 
 export interface AuthAPI {

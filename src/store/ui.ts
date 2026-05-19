@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 // Lightweight UI store for global modals & command palette.
-type ModalKind = null | "new-meeting" | "new-task" | "edit-task" | "new-channel" | "new-team" | "new-project" | "command" | "invite" | "meeting-detail";
+type ModalKind = null | "new-meeting" | "new-task" | "edit-task" | "new-channel" | "new-team" | "new-project" | "new-resource" | "command" | "invite" | "meeting-detail";
 
 interface UIState {
   modal: ModalKind;
