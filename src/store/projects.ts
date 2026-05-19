@@ -1,7 +1,7 @@
-import { create } from "zustand";
+import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team, TeamMember } from "@/services";
 import { api } from "@/services";
 import { useNotificationsStore } from "@/store/notifications";
-import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team, TeamMember } from "@/services";
+import { create } from "zustand";
 
 interface ProjectsState {
   // entities
@@ -22,6 +22,8 @@ interface ProjectsState {
   setProject: (id: string | null) => void;
   createTeam: (p: CreateTeamPayload) => Promise<Team>;
   createProject: (p: CreateProjectPayload) => Promise<Project>;
+  addResource: (p: AddProjectResourcePayload) => Promise<ProjectResource>;
+  removeResource: (projectId: string, resourceId: string) => Promise<void>;
   create: (p: CreateTaskPayload) => Promise<Task>;
   move: (id: string, status: TaskStatus) => Promise<void>;
   update: (id: string, patch: Partial<Task>) => Promise<Task>;
@@ -110,6 +112,23 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     const project = await api.projects.createProject(p);
     set({ projects: [...get().projects, project], currentProjectId: project.id, currentTeamId: project.teamId });
     return project;
+  },
+  async addResource(p) {
+    const resource = await api.projects.addProjectResource(p);
+    set({
+      projects: get().projects.map(pr => pr.id === p.projectId
+        ? { ...pr, resources: [...(pr.resources ?? []), resource] }
+        : pr),
+    });
+    return resource;
+  },
+  async removeResource(projectId, resourceId) {
+    await api.projects.removeProjectResource(projectId, resourceId);
+    set({
+      projects: get().projects.map(pr => pr.id === projectId
+        ? { ...pr, resources: (pr.resources ?? []).filter(r => r.id !== resourceId) }
+        : pr),
+    });
   },
 
   async create(p) {
