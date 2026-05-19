@@ -10,21 +10,25 @@ import { api } from "@/services";
 import { useProjectsStore } from "@/store/projects";
 
 const AcceptInvite = () => {
-  const { token } = useParams();
+  const { token, inviteId } = useParams();
   const navigate = useNavigate();
   const fetchAll = useProjectsStore(s => s.fetchAll);
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState("Validation de l'invitation...");
 
   useEffect(() => {
-    if (!token) {
+    if (!token && !inviteId) {
       setStatus("error");
       setMessage("Lien d'invitation invalide.");
       return;
     }
 
     let alive = true;
-    void api.projects.acceptTeamInvite(token)
+    const accept = inviteId
+      ? api.projects.acceptTeamInviteById(inviteId)
+      : api.projects.acceptTeamInvite(token!);
+
+    void accept
       .then(async (team) => {
         if (!alive) return;
         await fetchAll();
@@ -40,7 +44,7 @@ const AcceptInvite = () => {
       });
 
     return () => { alive = false; };
-  }, [fetchAll, navigate, token]);
+  }, [fetchAll, inviteId, navigate, token]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
