@@ -490,8 +490,13 @@ const mapNotification = (notification: BackendNotification): Notification => {
   const data = notification.data ?? {};
   const meetingId = typeof data.meetingId === "string" ? data.meetingId : undefined;
   const workspaceId = typeof data.workspaceId === "string" ? data.workspaceId : undefined;
+  const inviteId = typeof data.inviteId === "string" ? data.inviteId : undefined;
   const inviteHref =
-    typeof data.inviteUrl === "string" ? toAppPath(data.inviteUrl) : undefined;
+    typeof data.inviteUrl === "string"
+      ? toAppPath(data.inviteUrl)
+      : inviteId
+        ? `/invite/id/${inviteId}`
+        : undefined;
 
   return {
     id: notification.id,
@@ -694,6 +699,13 @@ const projects: ProjectsAPI = {
   async acceptTeamInvite(token) {
     const data = await unwrap<{ workspace: BackendWorkspace }>(
       client.post(`/workspaces/invites/${token}/accept`)
+    );
+    setActiveWorkspaceId(data.workspace.id);
+    return mapTeam(data.workspace);
+  },
+  async acceptTeamInviteById(inviteId) {
+    const data = await unwrap<{ workspace: BackendWorkspace }>(
+      client.post(`/workspaces/invites/by-id/${inviteId}/accept`)
     );
     setActiveWorkspaceId(data.workspace.id);
     return mapTeam(data.workspace);
