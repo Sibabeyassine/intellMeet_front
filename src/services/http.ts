@@ -476,10 +476,22 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => {
   };
 };
 
+const toAppPath = (value: string): string | undefined => {
+  if (value.startsWith("/")) return value;
+
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return undefined;
+  }
+};
+
 const mapNotification = (notification: BackendNotification): Notification => {
   const data = notification.data ?? {};
   const meetingId = typeof data.meetingId === "string" ? data.meetingId : undefined;
   const workspaceId = typeof data.workspaceId === "string" ? data.workspaceId : undefined;
+  const inviteHref =
+    typeof data.inviteUrl === "string" ? toAppPath(data.inviteUrl) : undefined;
 
   return {
     id: notification.id,
@@ -488,7 +500,9 @@ const mapNotification = (notification: BackendNotification): Notification => {
     href:
       notification.type === "chat_message"
         ? undefined
-        : meetingId
+        : inviteHref
+          ? inviteHref
+          : meetingId
           ? `/meeting/${meetingId}`
           : workspaceId
             ? "/projects"
@@ -501,7 +515,7 @@ const mapNotification = (notification: BackendNotification): Notification => {
         : notification.type === "chat_message"
           ? "message"
         : notification.type === "system"
-          ? "ai"
+          ? inviteHref ? "mention" : "ai"
           : "meeting"
   };
 };
