@@ -416,12 +416,26 @@ const MeetingRoom = () => {
       return peer;
     };
 
+    const initiatePeerOffer = async (remoteUserId: string) => {
+      const peer = peerFor(remoteUserId);
+
+      if (peer.signalingState !== "stable") return;
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      sendSignalTo(remoteUserId, offer);
+    };
+
     socket.on("connect", () => {
       socket.emit("meeting:join", { meetingId });
     });
 
     socket.on("meeting:joined", (payload: { participants?: RealtimeParticipantPresence[] }) => {
-      payload.participants?.forEach(upsertPresence);
+      payload.participants?.forEach((participant) => {
+        if (participant.userId === user.id) return;
+        upsertPresence(participant);
+        void initiatePeerOffer(participant.userId).catch(() => undefined);
+      });
       const mediaState = mediaStateRef.current;
       socket.emit("meeting:media-state", {
         meetingId,
@@ -435,10 +449,6 @@ const MeetingRoom = () => {
       if (payload.userId === user.id) return;
       upsertPresence(payload);
       emitMediaState();
-      const peer = peerFor(payload.userId);
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      sendSignalTo(payload.userId, offer);
     });
 
     socket.on("participant:left", (payload: { userId: string }) => {
