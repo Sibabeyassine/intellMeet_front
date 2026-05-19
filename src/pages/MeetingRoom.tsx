@@ -162,6 +162,18 @@ const MeetingRoom = () => {
     });
   };
 
+  const sendSignalTo = (
+    targetUserId: string,
+    signal: RTCSessionDescriptionInit | RTCIceCandidateInit
+  ) => {
+    if (!meetingId || !socketRef.current?.connected) return;
+    socketRef.current.emit("meeting:signal", {
+      meetingId,
+      targetUserId,
+      signal
+    });
+  };
+
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
   useEffect(() => {
@@ -172,6 +184,32 @@ const MeetingRoom = () => {
   useEffect(() => {
     localStreamRef.current = localStream;
   }, [localStream]);
+
+  useEffect(() => {
+    if (!localStream || !meetingId) return;
+
+    void Promise.all(
+      Object.entries(peersRef.current).map(async ([remoteUserId, peer]) => {
+        localStream.getTracks().forEach((track) => {
+          const alreadySendingKind = peer
+            .getSenders()
+            .some((sender) => sender.track?.kind === track.kind);
+
+          if (!alreadySendingKind) {
+            peer.addTrack(track, localStream);
+          }
+        });
+
+        if (peer.signalingState !== "stable") return;
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        sendSignalTo(remoteUserId, offer);
+      })
+    ).catch(() => undefined);
+
+    emitMediaState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localStream, meetingId]);
 
   useEffect(() => {
     mediaStateRef.current = { micOn, cameraOn, screenSharing };
@@ -288,7 +326,7 @@ const MeetingRoom = () => {
   }, [meetingId, meetings, navigate, user?.id]);
 
   useEffect(() => {
-    if (!meetingId || !user || !localStream) return;
+    if (!meetingId || !user) return;
 
     const token = readAccessToken();
     if (!token) return;
@@ -310,19 +348,16 @@ const MeetingRoom = () => {
       setRemoteParticipants((current) => current.filter((item) => item.id !== userId));
     };
 
-    const sendSignal = (targetUserId: string, signal: RTCSessionDescriptionInit | RTCIceCandidateInit) => {
-      socket.emit("meeting:signal", { meetingId, targetUserId, signal });
-    };
-
     const peerFor = (remoteUserId: string) => {
       if (peersRef.current[remoteUserId]) return peersRef.current[remoteUserId];
 
       const peer = new RTCPeerConnection(rtcConfig);
       peersRef.current[remoteUserId] = peer;
-      localStream.getTracks().forEach((track) => peer.addTrack(track, localStream));
+      const stream = localStreamRef.current;
+      stream?.getTracks().forEach((track) => peer.addTrack(track, stream));
 
       peer.onicecandidate = (event) => {
-        if (event.candidate) sendSignal(remoteUserId, event.candidate.toJSON());
+        if (event.candidate) sendSignalTo(remoteUserId, event.candidate.toJSON());
       };
       peer.ontrack = (event) => {
         const [stream] = event.streams;
@@ -385,7 +420,7 @@ const MeetingRoom = () => {
       const peer = peerFor(payload.userId);
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      sendSignal(payload.userId, offer);
+      sendSignalTo(payload.userId, offer);
     });
 
     socket.on("participant:left", (payload: { userId: string }) => {
@@ -426,7 +461,7 @@ const MeetingRoom = () => {
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
-          sendSignal(payload.fromUserId, answer);
+          sendSignalTo(payload.fromUserId, answer);
         } else if ("type" in signal && signal.type === "answer") {
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
         } else if ("candidate" in signal) {
@@ -447,7 +482,7 @@ const MeetingRoom = () => {
       peersRef.current = {};
       setRemoteParticipants([]);
     };
-  }, [localStream, meetingId, user]);
+  }, [meetingId, user]);
 
   // "you" reflects toggles
   const participants = useMemo(() => {

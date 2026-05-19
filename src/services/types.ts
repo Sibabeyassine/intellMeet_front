@@ -96,6 +96,7 @@ export interface CreateMeetingPayload {
   description?: string;
   scheduledAt: ISODate;
   durationMin: number;
+  participantIds?: ID[];
   participantEmails?: string[];
 }
 

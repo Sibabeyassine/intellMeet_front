@@ -839,6 +839,7 @@ const meetings: MeetingsAPI = {
         description: payload.description,
         startsAt,
         endsAt,
+        participantIds: payload.participantIds ?? [],
         participantEmails: payload.participantEmails ?? []
       })
     );
