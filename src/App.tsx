@@ -46,6 +46,7 @@ const App = () => (
               <Route path="/settings" element={<Protected><Settings /></Protected>} />
               <Route path="/profile" element={<Protected><Profile /></Protected>} />
               <Route path="/invite/:token" element={<Protected><AcceptInvite /></Protected>} />
+              <Route path="/invite/id/:inviteId" element={<Protected><AcceptInvite /></Protected>} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

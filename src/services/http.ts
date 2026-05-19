@@ -476,10 +476,27 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => {
   };
 };
 
+const toAppPath = (value: string): string | undefined => {
+  if (value.startsWith("/")) return value;
+
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return undefined;
+  }
+};
+
 const mapNotification = (notification: BackendNotification): Notification => {
   const data = notification.data ?? {};
   const meetingId = typeof data.meetingId === "string" ? data.meetingId : undefined;
   const workspaceId = typeof data.workspaceId === "string" ? data.workspaceId : undefined;
+  const inviteId = typeof data.inviteId === "string" ? data.inviteId : undefined;
+  const inviteHref =
+    typeof data.inviteUrl === "string"
+      ? toAppPath(data.inviteUrl)
+      : inviteId
+        ? `/invite/id/${inviteId}`
+        : undefined;
 
   return {
     id: notification.id,
@@ -488,7 +505,9 @@ const mapNotification = (notification: BackendNotification): Notification => {
     href:
       notification.type === "chat_message"
         ? undefined
-        : meetingId
+        : inviteHref
+          ? inviteHref
+          : meetingId
           ? `/meeting/${meetingId}`
           : workspaceId
             ? "/projects"
@@ -501,7 +520,7 @@ const mapNotification = (notification: BackendNotification): Notification => {
         : notification.type === "chat_message"
           ? "message"
         : notification.type === "system"
-          ? "ai"
+          ? inviteHref ? "mention" : "ai"
           : "meeting"
   };
 };
@@ -680,6 +699,13 @@ const projects: ProjectsAPI = {
   async acceptTeamInvite(token) {
     const data = await unwrap<{ workspace: BackendWorkspace }>(
       client.post(`/workspaces/invites/${token}/accept`)
+    );
+    setActiveWorkspaceId(data.workspace.id);
+    return mapTeam(data.workspace);
+  },
+  async acceptTeamInviteById(inviteId) {
+    const data = await unwrap<{ workspace: BackendWorkspace }>(
+      client.post(`/workspaces/invites/by-id/${inviteId}/accept`)
     );
     setActiveWorkspaceId(data.workspace.id);
     return mapTeam(data.workspace);
