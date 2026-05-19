@@ -132,6 +132,17 @@ export interface Project {
   createdAt: ISODate;
 }
 
+export type ProjectResourceKind = "image" | "doc" | "link" | "file";
+
+export interface ProjectResource {
+  id: ID;
+  projectId: ID;
+  name: string;
+  url: string;
+  kind: ProjectResourceKind;
+  createdAt: ISODate;
+}
+
 export type TaskStatus = "backlog" | "todo" | "in_progress" | "review" | "done";
 export type TaskPriority = "low" | "med" | "high";
 

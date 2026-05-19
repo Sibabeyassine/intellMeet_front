@@ -1,4 +1,4 @@
-import type { CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, Task, TaskStatus, Team, TeamMember } from "@/services";
+import type { AddProjectResourcePayload, CreateProjectPayload, CreateTaskPayload, CreateTeamPayload, Project, ProjectResource, Task, TaskStatus, Team, TeamMember } from "@/services";
 import { api } from "@/services";
 import { useNotificationsStore } from "@/store/notifications";
 import { create } from "zustand";

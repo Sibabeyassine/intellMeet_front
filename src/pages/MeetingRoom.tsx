@@ -46,8 +46,17 @@ type RemoteParticipant = Participant & {
 
 type RealtimeSignal = {
   fromUserId: string;
+  fromName?: string;
+  fromEmail?: string;
   targetUserId?: string;
   signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
+};
+
+type RealtimeParticipantPresence = {
+  userId: string;
+  socketId?: string;
+  name?: string;
+  email?: string;
 };
 
 type MediaStatePayload = {
@@ -342,6 +351,21 @@ const MeetingRoom = () => {
       });
     };
 
+    const upsertPresence = (payload: RealtimeParticipantPresence) => {
+      if (payload.userId === user.id) return;
+      const name = payload.name ?? payload.email ?? "Participant";
+
+      upsertRemote({
+        id: payload.userId,
+        socketId: payload.socketId,
+        name,
+        initials: initialsFor(name),
+        color: "265 70% 60%",
+        isMuted: true,
+        isCameraOn: false
+      });
+    };
+
     const removeRemote = (userId: string) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
@@ -396,7 +420,8 @@ const MeetingRoom = () => {
       socket.emit("meeting:join", { meetingId });
     });
 
-    socket.on("meeting:joined", () => {
+    socket.on("meeting:joined", (payload: { participants?: RealtimeParticipantPresence[] }) => {
+      payload.participants?.forEach(upsertPresence);
       const mediaState = mediaStateRef.current;
       socket.emit("meeting:media-state", {
         meetingId,
@@ -408,14 +433,7 @@ const MeetingRoom = () => {
 
     socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
       if (payload.userId === user.id) return;
-      upsertRemote({
-        id: payload.userId,
-        socketId: payload.socketId,
-        name: payload.name ?? "Participant",
-        initials: (payload.name ?? "PT").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase(),
-        color: "265 70% 60%",
-        isCameraOn: false
-      });
+      upsertPresence(payload);
       emitMediaState();
       const peer = peerFor(payload.userId);
       const offer = await peer.createOffer();
@@ -430,16 +448,29 @@ const MeetingRoom = () => {
     socket.on("participant:media-state", (payload: MediaStatePayload) => {
       if (payload.userId === user.id) return;
       setRemoteParticipants((current) =>
-        current.map((participant) =>
-          participant.id === payload.userId
-            ? {
-                ...participant,
+        current.some((participant) => participant.id === payload.userId)
+          ? current.map((participant) =>
+              participant.id === payload.userId
+                ? {
+                    ...participant,
+                    isMuted: !payload.micOn,
+                    isCameraOn: payload.cameraOn || payload.screenSharing,
+                    isScreenSharing: payload.screenSharing
+                  }
+                : participant
+            )
+          : [
+              ...current,
+              {
+                id: payload.userId,
+                name: "Participant",
+                initials: "PT",
+                color: "265 70% 60%",
                 isMuted: !payload.micOn,
                 isCameraOn: payload.cameraOn || payload.screenSharing,
                 isScreenSharing: payload.screenSharing
               }
-            : participant
-        )
+            ]
       );
     });
 
@@ -452,6 +483,12 @@ const MeetingRoom = () => {
     socket.on("meeting:signal", async (payload: RealtimeSignal) => {
       if (payload.fromUserId === user.id) return;
       if (payload.targetUserId && payload.targetUserId !== user.id) return;
+
+      upsertPresence({
+        userId: payload.fromUserId,
+        name: payload.fromName,
+        email: payload.fromEmail
+      });
 
       const peer = peerFor(payload.fromUserId);
       const signal = payload.signal;

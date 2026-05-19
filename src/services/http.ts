@@ -736,6 +736,20 @@ const projects: ProjectsAPI = {
     setActiveProjectId(project.id);
     return mapProject(project);
   },
+  async addProjectResource(payload) {
+    return {
+      id: crypto.randomUUID?.() ?? `${payload.projectId}_${Date.now()}`,
+      projectId: payload.projectId,
+      name: payload.name,
+      url: payload.url,
+      kind: payload.kind ?? "link",
+      createdAt: new Date().toISOString()
+    };
+  },
+  async removeProjectResource() {
+    // Project resources are currently client-side metadata until the backend
+    // exposes a dedicated resources endpoint.
+  },
   async listTasks(projectId?: ID, teamId?: ID) {
     const workspaceId = teamId ?? await ensureWorkspaceId();
     if (!workspaceId) return [];
