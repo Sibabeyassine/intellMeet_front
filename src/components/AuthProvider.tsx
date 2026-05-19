@@ -1,6 +1,10 @@
 import { useEffect } from "react";
+import { io, Socket } from "socket.io-client";
 import { useAuthStore } from "@/store/auth";
 import { useNotificationsStore } from "@/store/notifications";
+import { useProjectsStore } from "@/store/projects";
+
+const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8000";
 
 /**
  * Hydrates the session from storage on first mount and pulls notifications
@@ -32,6 +36,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => window.clearInterval(interval);
   }, [session, fetchNotifs, clearNotifs]);
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const socket: Socket = io(WS_URL, {
+      auth: { token: session.accessToken }
+    });
+
+    socket.on("workspace:members-updated", () => {
+      void useProjectsStore.getState().fetchAll();
+      void fetchNotifs();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [fetchNotifs, session?.accessToken]);
 
   if (!initialized) {
     return (

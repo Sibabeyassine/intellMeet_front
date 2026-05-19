@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, Users2, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, Users2, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight, Mail, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth, addMonths, subMonths } from "date-fns";
 import { AppShell } from "@/components/app/AppShell";
@@ -11,9 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useProjectsStore, useCurrentProject } from "@/store/projects";
 import { useUIStore } from "@/store/ui";
-import type { Task, TaskStatus, Team } from "@/services";
+import type { Task, TaskStatus, Team, TeamMember } from "@/services";
 
-type ViewMode = "kanban" | "list" | "calendar";
+type ViewMode = "kanban" | "list" | "calendar" | "members";
 
 const Projects = () => {
   const { t, i18n } = useTranslation();
@@ -218,6 +218,9 @@ const Projects = () => {
             <Button onClick={() => setView("calendar")} variant={view === "calendar" ? "secondary" : "ghost"} size="sm" className="gap-1.5 h-7">
               <CalIcon className="h-3.5 w-3.5" />{t("projects.view.calendar")}
             </Button>
+            <Button onClick={() => setView("members")} variant={view === "members" ? "secondary" : "ghost"} size="sm" className="gap-1.5 h-7">
+              <Users2 className="h-3.5 w-3.5" />Membres
+            </Button>
           </div>
         </div>
 
@@ -271,6 +274,7 @@ const Projects = () => {
 
           {view === "list" && <ListView tasks={tasks} onOpen={(id) => openModal("edit-task", { taskId: id })} />}
           {view === "calendar" && <CalendarView tasks={tasks} locale={i18n.language} onOpen={(id) => openModal("edit-task", { taskId: id })} />}
+          {view === "members" && <MembersView members={members} onInvite={() => openModal("invite")} />}
         </div>
         </>
         )}
@@ -343,6 +347,88 @@ function TeamsOverview({ teams, onOpen, onCreate }: { teams: Team[]; onOpen: (id
             <Button onClick={onCreate} variant="hero" className="mt-5 gap-2">
               <Plus className="h-4 w-4" />
               Créer une équipe
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MembersView({ members, onInvite }: { members: TeamMember[]; onInvite: () => void }) {
+  const activeMembers = members.filter((member) => member.status === "active");
+  const invitedMembers = members.filter((member) => member.status === "invited");
+
+  return (
+    <div className="h-full overflow-y-auto p-6 scrollbar-thin">
+      <div className="mx-auto max-w-6xl space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-lg font-semibold text-foreground">Membres de l'équipe</h2>
+            <p className="text-sm text-muted-foreground">
+              {activeMembers.length} actifs · {invitedMembers.length} invitations en attente
+            </p>
+          </div>
+          <Button onClick={onInvite} variant="outline" className="gap-2">
+            <UserPlus className="h-4 w-4" />
+            Inviter un membre
+          </Button>
+        </div>
+
+        {members.length ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {members.map((member) => (
+              <Card key={member.userId} className="border-border bg-card p-4 shadow-elev-sm">
+                <div className="flex items-start gap-3">
+                  <div
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white"
+                    style={{ backgroundColor: `hsl(${member.color})` }}
+                  >
+                    {member.initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate font-display text-sm font-semibold text-foreground">
+                          {member.name}
+                        </h3>
+                        {member.email && (
+                          <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            {member.email}
+                          </p>
+                        )}
+                      </div>
+                      <Badge variant={member.status === "active" ? "secondary" : "outline"} className="shrink-0">
+                        {member.status === "active" ? "Actif" : member.status === "invited" ? "Invité" : "Retiré"}
+                      </Badge>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="gap-1">
+                        <ShieldCheck className="h-3 w-3" />
+                        {member.role === "owner" ? "Propriétaire" : member.role === "admin" ? "Admin" : "Membre"}
+                      </Badge>
+                      {member.status === "invited" && (
+                        <span className="text-xs text-muted-foreground">Invitation en attente d'acceptation</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/40 p-8 text-center">
+            <Users2 className="h-10 w-10 text-muted-foreground" />
+            <h3 className="mt-4 font-display text-lg font-semibold text-foreground">
+              Aucun membre dans cette équipe
+            </h3>
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Invite tes collaborateurs pour leur donner accès aux projets et aux tâches de cette équipe.
+            </p>
+            <Button onClick={onInvite} variant="hero" className="mt-5 gap-2">
+              <UserPlus className="h-4 w-4" />
+              Inviter un membre
             </Button>
           </div>
         )}
