@@ -172,6 +172,10 @@ const MeetingRoom = () => {
   const [presentParticipants, setPresentParticipants] = useState<RealtimeParticipantPresence[]>([]);
   const [debugPresenceApi, setDebugPresenceApi] = useState<RealtimeParticipantPresence[]>([]);
   const [debugLastPresenceSyncAt, setDebugLastPresenceSyncAt] = useState<string | null>(null);
+  const [debugJoinStatus, setDebugJoinStatus] = useState<"idle" | "success" | "fallback" | "error">("idle");
+  const [debugJoinError, setDebugJoinError] = useState<string | null>(null);
+  const [debugPresenceError, setDebugPresenceError] = useState<string | null>(null);
+  const [debugMeetingError, setDebugMeetingError] = useState<string | null>(null);
   const [screenSharing, setScreenSharing] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [renewingSession, setRenewingSession] = useState(false);
@@ -351,14 +355,23 @@ const MeetingRoom = () => {
     setActionItems([]);
     setSuggestions([]);
     setJoinedMeetingId(null);
+    setDebugJoinStatus("idle");
+    setDebugJoinError(null);
+    setDebugPresenceError(null);
+    setDebugMeetingError(null);
     void (async () => {
       let loadedMeeting: Meeting | null = null;
       let joinError: unknown = null;
 
       try {
         loadedMeeting = await api.meetings.join(id);
+        setDebugJoinStatus("success");
       } catch (error) {
         joinError = error;
+        setDebugJoinStatus("fallback");
+        setDebugJoinError(
+          error instanceof Error ? error.message : "join failed"
+        );
         loadedMeeting = await api.meetings.get(id).catch(() => null);
       }
 
@@ -366,6 +379,7 @@ const MeetingRoom = () => {
       setMeeting(loadedMeeting);
 
       if (joinError && (!user?.id || !meetingIncludesUser(loadedMeeting, user.id))) {
+        setDebugJoinStatus("error");
         toast.error(
           joinError instanceof Error
             ? joinError.message
@@ -595,11 +609,17 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const freshMeeting = await api.meetings.get(meetingId).catch(() => null);
+      const freshMeeting = await api.meetings.get(meetingId).catch((error) => {
+        setDebugMeetingError(
+          error instanceof Error ? error.message : "meeting get failed"
+        );
+        return null;
+      });
 
       const fallbackParticipants = new Map<string, RealtimeParticipantPresence>();
 
       if (freshMeeting) {
+        setDebugMeetingError(null);
         setMeeting(freshMeeting);
         if (freshMeeting.status !== "live") {
           remoteSeenAtRef.current = {};
@@ -625,10 +645,21 @@ const MeetingRoom = () => {
         });
       }
 
-      await api.meetings.touchPresence(meetingId).catch(() => undefined);
+      let presenceError: string | null = null;
+      await api.meetings.touchPresence(meetingId).catch((error) => {
+        presenceError =
+          error instanceof Error ? `touch: ${error.message}` : "touch failed";
+        return null;
+      });
+
       const activeParticipants = await api.meetings
         .listPresence(meetingId)
-        .catch(() => []);
+        .catch((error) => {
+          presenceError =
+            error instanceof Error ? `list: ${error.message}` : "list failed";
+          return [];
+        });
+      setDebugPresenceError(presenceError);
       setDebugPresenceApi(
         activeParticipants.map((participant) => ({
           userId: participant.userId,
@@ -970,7 +1001,11 @@ const MeetingRoom = () => {
     presentParticipantIds: presentParticipants.map((participant) => participant.userId),
     remoteParticipantIds: remoteParticipants.map((participant) => participant.id),
     renderedParticipantIds: participants.map((participant) => participant.id),
-    lastPresenceSyncAt: debugLastPresenceSyncAt
+    lastPresenceSyncAt: debugLastPresenceSyncAt,
+    joinStatus: debugJoinStatus,
+    joinError: debugJoinError,
+    presenceError: debugPresenceError,
+    meetingError: debugMeetingError
   };
   const meetingEndsAt = meeting
     ? new Date(
