@@ -168,6 +168,7 @@ const MeetingRoom = () => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
+  const [presentParticipants, setPresentParticipants] = useState<RealtimeParticipantPresence[]>([]);
   const [screenSharing, setScreenSharing] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [renewingSession, setRenewingSession] = useState(false);
@@ -412,6 +413,16 @@ const MeetingRoom = () => {
       if (payload.userId === user.id) return;
       const name = payload.name ?? payload.email ?? "Participant";
 
+      setPresentParticipants((current) => {
+        const exists = current.find((item) => item.userId === payload.userId);
+        if (!exists) return [...current, { ...payload, name }];
+        return current.map((item) =>
+          item.userId === payload.userId
+            ? { ...item, ...payload, name }
+            : item
+        );
+      });
+
       upsertRemote({
         id: payload.userId,
         socketId: payload.socketId,
@@ -448,6 +459,7 @@ const MeetingRoom = () => {
       closePeerFor(userId);
       delete remoteSeenAtRef.current[userId];
       delete peerRetryAtRef.current[userId];
+      setPresentParticipants((current) => current.filter((item) => item.userId !== userId));
       setRemoteParticipants((current) => current.filter((item) => item.id !== userId));
       setMeeting((current) =>
         current
@@ -588,6 +600,7 @@ const MeetingRoom = () => {
         setMeeting(freshMeeting);
         if (freshMeeting.status !== "live") {
           remoteSeenAtRef.current = {};
+          setPresentParticipants([]);
           setRemoteParticipants([]);
           return;
         }
@@ -622,9 +635,21 @@ const MeetingRoom = () => {
           })),
         ...fallbackParticipants.values()
       ];
+      const dedupedParticipants = Array.from(
+        new Map(
+          reliableParticipants.map((participant) => [
+            participant.userId,
+            participant
+          ])
+        ).values()
+      );
       const activeParticipantIds = new Set<string>();
 
-      reliableParticipants.forEach((participant) => {
+      setPresentParticipants(
+        dedupedParticipants.filter((participant) => participant.userId !== user.id)
+      );
+
+      dedupedParticipants.forEach((participant) => {
         if (participant.userId === user.id) return;
         activeParticipantIds.add(participant.userId);
         upsertPresence({
@@ -837,6 +862,7 @@ const MeetingRoom = () => {
       peerRetryAtRef.current = {};
       processedSignalIdsRef.current = new Set();
       lastSignalAtRef.current = undefined;
+      setPresentParticipants([]);
       setRemoteParticipants([]);
     };
   }, [emitMediaState, joinedMeetingId, meetingId, sendSignalTo, transcriptLineFromText, user]);
@@ -877,6 +903,15 @@ const MeetingRoom = () => {
 
     if (meeting?.status === "live") {
       const liveParticipantIds = new Set(meeting.liveParticipantIds ?? []);
+      presentParticipants.forEach((participant) => {
+        addKnownParticipant({
+          id: participant.userId,
+          name: participant.name ?? participant.email ?? "Participant",
+          initials: initialsFor(participant.name ?? participant.email ?? "Participant"),
+          color: "265 70% 60%",
+          isHost: participant.userId === meeting.hostId
+        });
+      });
       meeting.participants
         .filter((participant) => liveParticipantIds.has(participant.id))
         .forEach(addKnownParticipant);
@@ -901,6 +936,7 @@ const MeetingRoom = () => {
     localStream,
     meeting,
     micOn,
+    presentParticipants,
     remoteParticipants,
     screenSharing,
     user
