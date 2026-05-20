@@ -502,6 +502,9 @@ const MeetingRoom = () => {
       peer.ontrack = (event) => {
         const [stream] = event.streams;
         if (stream) {
+          const hasLiveVideo = stream
+            .getVideoTracks()
+            .some((track) => track.readyState === "live");
           setRemoteParticipants((current) => {
             const existing = current.find((item) => item.id === remoteUserId);
             const name = existing?.name ?? "Participant";
@@ -512,7 +515,7 @@ const MeetingRoom = () => {
               initials: existing?.initials ?? initialsFor(name),
               color: existing?.color ?? "265 70% 60%",
               isMuted: existing?.isMuted,
-              isCameraOn: stream.getVideoTracks().some((track) => track.enabled),
+              isCameraOn: hasLiveVideo,
               stream
             };
 
