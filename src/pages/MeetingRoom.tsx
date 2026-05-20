@@ -17,7 +17,21 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
+const resolveWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+
+  try {
+    const url = new URL(API_URL);
+    url.pathname = url.pathname.replace(/\/api\/?$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "http://localhost:8000";
+  }
+};
+const WS_URL = resolveWsUrl();
 const SESSION_KEY = "intellmeet.http.session";
 const parseIceServers = (): RTCIceServer[] => {
   const value = import.meta.env.VITE_RTC_ICE_SERVERS;
@@ -153,6 +167,7 @@ const MeetingRoom = () => {
   const [now, setNow] = useState(Date.now());
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
+  const remoteSeenAtRef = useRef<Record<string, number>>({});
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
@@ -344,6 +359,7 @@ const MeetingRoom = () => {
     socketRef.current = socket;
 
     const upsertRemote = (participant: RemoteParticipant) => {
+      remoteSeenAtRef.current[participant.id] = Date.now();
       setRemoteParticipants((current) => {
         const exists = current.find((item) => item.id === participant.id);
         if (!exists) return [...current, participant];
@@ -366,23 +382,10 @@ const MeetingRoom = () => {
       });
     };
 
-    const upsertMeetingParticipant = (participant: Participant) => {
-      if (participant.id === user.id) return;
-
-      upsertRemote({
-        id: participant.id,
-        name: participant.name,
-        initials: participant.initials,
-        color: participant.color,
-        isHost: participant.isHost,
-        isMuted: participant.isMuted ?? true,
-        isCameraOn: participant.isCameraOn ?? false
-      });
-    };
-
     const removeRemote = (userId: string) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
+      delete remoteSeenAtRef.current[userId];
       setRemoteParticipants((current) => current.filter((item) => item.id !== userId));
       setMeeting((current) =>
         current
@@ -466,44 +469,25 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const [activeParticipants, freshMeeting] = await Promise.all([
+      const [, freshMeeting] = await Promise.all([
         api.meetings.touchPresence(meetingId),
         api.meetings.get(meetingId).catch(() => null)
       ]);
-      const activeRemoteIds = new Set<string>();
 
       if (freshMeeting) {
         setMeeting(freshMeeting);
-        const roomParticipants = freshMeeting.participants.filter(
-          (participant, index, participants) =>
-            participants.findIndex((item) => item.id === participant.id) === index
-        );
-
-        roomParticipants.forEach((participant) => {
-          if (participant.id === user.id) return;
-          activeRemoteIds.add(participant.id);
-          upsertMeetingParticipant(participant);
-
-          maybeInitiatePeerOffer(participant.id);
-        });
+        if (freshMeeting.status !== "live") {
+          remoteSeenAtRef.current = {};
+          setRemoteParticipants([]);
+          return;
+        }
       }
 
-      activeParticipants.forEach((participant) => {
-        if (participant.userId !== user.id) activeRemoteIds.add(participant.userId);
-      });
-
-      activeParticipants.forEach((participant) => {
-        if (participant.userId === user.id) return;
-
-        upsertPresence({
-          userId: participant.userId,
-          name: participant.name,
-          email: participant.email
-        });
-
-        maybeInitiatePeerOffer(participant.userId);
-      });
-
+      const activeRemoteIds = new Set(
+        Object.entries(remoteSeenAtRef.current)
+          .filter(([, seenAt]) => Date.now() - seenAt < 10000)
+          .map(([participantId]) => participantId)
+      );
       setRemoteParticipants((current) =>
         current.filter((participant) => activeRemoteIds.has(participant.id))
       );
@@ -646,10 +630,7 @@ const MeetingRoom = () => {
       isScreenSharing: screenSharing,
       stream: localStream ?? undefined
     };
-    const knownParticipants = [
-      ...remoteParticipants,
-      ...(meeting?.participants ?? [])
-    ].filter(
+    const knownParticipants = (meeting?.status === "live" ? remoteParticipants : []).filter(
       (participant, index, participantList) =>
         participant.id !== fallbackParticipant.id &&
         participantList.findIndex((item) => item.id === participant.id) === index
