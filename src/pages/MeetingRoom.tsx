@@ -448,6 +448,12 @@ const MeetingRoom = () => {
       sendSignalTo(remoteUserId, offer);
     };
 
+    const maybeInitiatePeerOffer = (remoteUserId: string) => {
+      if (remoteUserId === user.id) return;
+      if (user.id > remoteUserId) return;
+      void initiatePeerOffer(remoteUserId).catch(() => undefined);
+    };
+
     const announcePresence = () => {
       socket.emit("meeting:presence", { meetingId });
       const mediaState = mediaStateRef.current;
@@ -478,9 +484,7 @@ const MeetingRoom = () => {
           activeRemoteIds.add(participant.id);
           upsertMeetingParticipant(participant);
 
-          if (!peersRef.current[participant.id] && user.id > participant.id) {
-            void initiatePeerOffer(participant.id).catch(() => undefined);
-          }
+          maybeInitiatePeerOffer(participant.id);
         });
       }
 
@@ -497,9 +501,7 @@ const MeetingRoom = () => {
           email: participant.email
         });
 
-        if (!peersRef.current[participant.userId] && user.id > participant.userId) {
-          void initiatePeerOffer(participant.userId).catch(() => undefined);
-        }
+        maybeInitiatePeerOffer(participant.userId);
       });
 
       setRemoteParticipants((current) =>
@@ -515,7 +517,7 @@ const MeetingRoom = () => {
       payload.participants?.forEach((participant) => {
         if (participant.userId === user.id) return;
         upsertPresence(participant);
-        void initiatePeerOffer(participant.userId).catch(() => undefined);
+        maybeInitiatePeerOffer(participant.userId);
       });
       const mediaState = mediaStateRef.current;
       socket.emit("meeting:media-state", {
@@ -531,6 +533,7 @@ const MeetingRoom = () => {
     socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
       if (payload.userId === user.id) return;
       upsertPresence(payload);
+      maybeInitiatePeerOffer(payload.userId);
       emitMediaState();
     });
 
@@ -570,9 +573,7 @@ const MeetingRoom = () => {
     socket.on("participant:presence", (payload: RealtimeParticipantPresence) => {
       if (payload.userId === user.id) return;
       upsertPresence(payload);
-      if (!peersRef.current[payload.userId] && user.id > payload.userId) {
-        void initiatePeerOffer(payload.userId).catch(() => undefined);
-      }
+      maybeInitiatePeerOffer(payload.userId);
     });
 
     socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {

@@ -460,7 +460,7 @@ const minutesBetween = (start: string, end?: string) => {
 };
 
 const mapMeeting = (meeting: BackendMeeting): Meeting => {
-  const backendParticipants = meeting.participants?.length
+  const backendParticipants = Array.isArray(meeting.participants)
     ? meeting.participants
     : [
         {
