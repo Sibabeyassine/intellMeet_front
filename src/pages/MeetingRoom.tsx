@@ -19,7 +19,6 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const WS_URL = resolveRealtimeUrl();
-const MEETING_DEBUG_ENABLED = true;
 const REALTIME_DISABLED =
   import.meta.env.VITE_DISABLE_REALTIME === "true" ||
   /vercel\.app$/i.test(new URL(WS_URL).hostname);
@@ -170,12 +169,6 @@ const MeetingRoom = () => {
   const localStreamRef = useRef<MediaStream | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
   const [presentParticipants, setPresentParticipants] = useState<RealtimeParticipantPresence[]>([]);
-  const [debugPresenceApi, setDebugPresenceApi] = useState<RealtimeParticipantPresence[]>([]);
-  const [debugLastPresenceSyncAt, setDebugLastPresenceSyncAt] = useState<string | null>(null);
-  const [debugJoinStatus, setDebugJoinStatus] = useState<"idle" | "success" | "fallback" | "error">("idle");
-  const [debugJoinError, setDebugJoinError] = useState<string | null>(null);
-  const [debugPresenceError, setDebugPresenceError] = useState<string | null>(null);
-  const [debugMeetingError, setDebugMeetingError] = useState<string | null>(null);
   const [screenSharing, setScreenSharing] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [renewingSession, setRenewingSession] = useState(false);
@@ -355,23 +348,14 @@ const MeetingRoom = () => {
     setActionItems([]);
     setSuggestions([]);
     setJoinedMeetingId(null);
-    setDebugJoinStatus("idle");
-    setDebugJoinError(null);
-    setDebugPresenceError(null);
-    setDebugMeetingError(null);
     void (async () => {
       let loadedMeeting: Meeting | null = null;
       let joinError: unknown = null;
 
       try {
         loadedMeeting = await api.meetings.join(id);
-        setDebugJoinStatus("success");
       } catch (error) {
         joinError = error;
-        setDebugJoinStatus("fallback");
-        setDebugJoinError(
-          error instanceof Error ? error.message : "join failed"
-        );
         loadedMeeting = await api.meetings.get(id).catch(() => null);
       }
 
@@ -379,7 +363,6 @@ const MeetingRoom = () => {
       setMeeting(loadedMeeting);
 
       if (joinError && (!user?.id || !meetingIncludesUser(loadedMeeting, user.id))) {
-        setDebugJoinStatus("error");
         toast.error(
           joinError instanceof Error
             ? joinError.message
@@ -612,22 +595,14 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const freshMeeting = await api.meetings.get(meetingId).catch((error) => {
-        setDebugMeetingError(
-          error instanceof Error ? error.message : "meeting get failed"
-        );
-        return null;
-      });
+      const freshMeeting = await api.meetings.get(meetingId).catch(() => null);
 
       const fallbackParticipants = new Map<string, RealtimeParticipantPresence>();
 
       if (freshMeeting) {
-        setDebugMeetingError(null);
         setMeeting(freshMeeting);
         if (freshMeeting.status !== "live") {
           remoteSeenAtRef.current = {};
-          setDebugPresenceApi([]);
-          setDebugLastPresenceSyncAt(new Date().toISOString());
           setPresentParticipants([]);
           setRemoteParticipants([]);
           return;
@@ -648,21 +623,7 @@ const MeetingRoom = () => {
         });
       }
 
-      let presenceError: string | null = null;
-      const activeParticipants = await api.meetings.touchPresence(meetingId).catch((error) => {
-        presenceError =
-          error instanceof Error ? `touch: ${error.message}` : "touch failed";
-        return [];
-      });
-      setDebugPresenceError(presenceError);
-      setDebugPresenceApi(
-        activeParticipants.map((participant) => ({
-          userId: participant.userId,
-          name: participant.name,
-          email: participant.email
-        }))
-      );
-      setDebugLastPresenceSyncAt(new Date().toISOString());
+      const activeParticipants = await api.meetings.touchPresence(meetingId).catch(() => []);
 
       const reliableParticipants = [
         ...activeParticipants
@@ -983,25 +944,6 @@ const MeetingRoom = () => {
   const mainSpeaker = participants.find(p => p.isSpeaking) ?? participants[0];
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
-  const debugSnapshot = {
-    mode: REALTIME_DISABLED ? "polling" : "socket",
-    socketConnected: Boolean(socketRef.current?.connected),
-    joinedMeetingId,
-    meetingId: meeting?.id ?? meetingId ?? null,
-    meetingStatus: meeting?.status ?? null,
-    liveParticipantIds: meeting?.liveParticipantIds ?? [],
-    joinedParticipantIds: meeting?.joinedParticipantIds ?? [],
-    invitedParticipantIds: meeting?.participantIds ?? [],
-    presenceApiIds: debugPresenceApi.map((participant) => participant.userId),
-    presentParticipantIds: presentParticipants.map((participant) => participant.userId),
-    remoteParticipantIds: remoteParticipants.map((participant) => participant.id),
-    renderedParticipantIds: participants.map((participant) => participant.id),
-    lastPresenceSyncAt: debugLastPresenceSyncAt,
-    joinStatus: debugJoinStatus,
-    joinError: debugJoinError,
-    presenceError: debugPresenceError,
-    meetingError: debugMeetingError
-  };
   const meetingEndsAt = meeting
     ? new Date(
         meeting.endsAt ??
@@ -1419,16 +1361,6 @@ const MeetingRoom = () => {
       <div className="flex min-h-0 flex-1">
         {/* Video grid */}
         <main className="relative flex min-w-0 flex-1 flex-col bg-gradient-mesh">
-          {MEETING_DEBUG_ENABLED && (
-            <div className="pointer-events-none absolute left-4 top-4 z-20 max-w-[420px] rounded-lg border border-amber-500/40 bg-black/80 p-3 font-mono text-[10px] leading-4 text-amber-100 shadow-lg">
-              <div className="mb-2 font-semibold uppercase tracking-wide text-amber-300">
-                Meeting debug
-              </div>
-              <pre className="whitespace-pre-wrap break-words">
-                {JSON.stringify(debugSnapshot, null, 2)}
-              </pre>
-            </div>
-          )}
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:flex-row">
             {/* Main speaker */}
             <div className="relative min-h-[40vh] flex-1 lg:min-h-0">

@@ -13,10 +13,15 @@ export function ParticipantTile({ participant, className, isPinned }: Props) {
   const { name, initials, color, isSpeaking, isMuted, isCameraOn, isHost, isYou, isScreenSharing } = participant;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const hasLiveVideo = Boolean(
-    participant.stream?.getVideoTracks().some((track) => track.readyState === "live")
+  const hasActiveVideo = Boolean(
+    participant.stream?.getVideoTracks().some(
+      (track) =>
+        track.readyState === "live" &&
+        track.enabled &&
+        !track.muted
+    )
   );
-  const showVideo = hasLiveVideo || Boolean(isCameraOn && participant.stream);
+  const showVideo = Boolean(participant.stream && isCameraOn && hasActiveVideo);
 
   useEffect(() => {
     if (videoRef.current && participant.stream) {
