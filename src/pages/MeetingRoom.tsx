@@ -80,6 +80,11 @@ type MediaStatePayload = {
   screenSharing: boolean;
 };
 
+type MeetingParticipantsPayload = {
+  meetingId?: string;
+  participants?: RealtimeParticipantPresence[];
+};
+
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 type SpeechRecognitionEvent = Event & {
   resultIndex: number;
@@ -167,6 +172,7 @@ const MeetingRoom = () => {
   const [now, setNow] = useState(Date.now());
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
+  const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   const remoteSeenAtRef = useRef<Record<string, number>>({});
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -441,6 +447,18 @@ const MeetingRoom = () => {
       return peer;
     };
 
+    const flushPendingIceCandidates = async (remoteUserId: string, peer: RTCPeerConnection) => {
+      const candidates = pendingIceCandidatesRef.current[remoteUserId] ?? [];
+      if (!candidates.length || !peer.remoteDescription) return;
+
+      pendingIceCandidatesRef.current[remoteUserId] = [];
+      await Promise.all(
+        candidates.map((candidate) =>
+          peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => undefined)
+        )
+      );
+    };
+
     const initiatePeerOffer = async (remoteUserId: string) => {
       const peer = peerFor(remoteUserId);
 
@@ -455,6 +473,31 @@ const MeetingRoom = () => {
       if (remoteUserId === user.id) return;
       if (user.id > remoteUserId) return;
       void initiatePeerOffer(remoteUserId).catch(() => undefined);
+    };
+
+    const syncRoomParticipants = (payload: MeetingParticipantsPayload) => {
+      if (payload.meetingId && payload.meetingId !== meetingId) return;
+
+      const roomParticipants = (payload.participants ?? []).filter(
+        (participant) => participant.userId !== user.id
+      );
+      const activeRemoteIds = new Set(roomParticipants.map((participant) => participant.userId));
+
+      roomParticipants.forEach((participant) => {
+        upsertPresence(participant);
+        maybeInitiatePeerOffer(participant.userId);
+      });
+
+      setRemoteParticipants((current) =>
+        current.filter((participant) => activeRemoteIds.has(participant.id))
+      );
+      Object.keys(peersRef.current).forEach((participantId) => {
+        if (activeRemoteIds.has(participantId)) return;
+        peersRef.current[participantId]?.close();
+        delete peersRef.current[participantId];
+        delete pendingIceCandidatesRef.current[participantId];
+        delete remoteSeenAtRef.current[participantId];
+      });
     };
 
     const announcePresence = () => {
@@ -527,6 +570,7 @@ const MeetingRoom = () => {
 
     socket.on("participant:media-state", (payload: MediaStatePayload) => {
       if (payload.userId === user.id) return;
+      remoteSeenAtRef.current[payload.userId] = Date.now();
       setRemoteParticipants((current) =>
         current.some((participant) => participant.id === payload.userId)
           ? current.map((participant) =>
@@ -560,6 +604,8 @@ const MeetingRoom = () => {
       maybeInitiatePeerOffer(payload.userId);
     });
 
+    socket.on("meeting:participants", syncRoomParticipants);
+
     socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
       if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
       transcriptTextRef.current = payload.transcript;
@@ -582,12 +628,21 @@ const MeetingRoom = () => {
       try {
         if ("type" in signal && signal.type === "offer") {
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
+          await flushPendingIceCandidates(payload.fromUserId, peer);
           const answer = await peer.createAnswer();
           await peer.setLocalDescription(answer);
           sendSignalTo(payload.fromUserId, answer);
         } else if ("type" in signal && signal.type === "answer") {
           await peer.setRemoteDescription(new RTCSessionDescription(signal));
+          await flushPendingIceCandidates(payload.fromUserId, peer);
         } else if ("candidate" in signal) {
+          if (!peer.remoteDescription) {
+            pendingIceCandidatesRef.current[payload.fromUserId] = [
+              ...(pendingIceCandidatesRef.current[payload.fromUserId] ?? []),
+              signal
+            ];
+            return;
+          }
           await peer.addIceCandidate(new RTCIceCandidate(signal));
         }
       } catch (error) {
@@ -611,6 +666,7 @@ const MeetingRoom = () => {
       socket.disconnect();
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
+      pendingIceCandidatesRef.current = {};
       setRemoteParticipants([]);
     };
   }, [meetingId, user]);
