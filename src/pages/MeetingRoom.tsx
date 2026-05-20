@@ -646,19 +646,11 @@ const MeetingRoom = () => {
       }
 
       let presenceError: string | null = null;
-      await api.meetings.touchPresence(meetingId).catch((error) => {
+      const activeParticipants = await api.meetings.touchPresence(meetingId).catch((error) => {
         presenceError =
           error instanceof Error ? `touch: ${error.message}` : "touch failed";
-        return null;
+        return [];
       });
-
-      const activeParticipants = await api.meetings
-        .listPresence(meetingId)
-        .catch((error) => {
-          presenceError =
-            error instanceof Error ? `list: ${error.message}` : "list failed";
-          return [];
-        });
       setDebugPresenceError(presenceError);
       setDebugPresenceApi(
         activeParticipants.map((participant) => ({
