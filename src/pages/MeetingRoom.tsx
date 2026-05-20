@@ -586,10 +586,8 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const [activeParticipants, freshMeeting] = await Promise.all([
-        api.meetings.touchPresence(meetingId),
-        api.meetings.get(meetingId).catch(() => null)
-      ]);
+      const activeParticipants = await api.meetings.touchPresence(meetingId);
+      const freshMeeting = await api.meetings.get(meetingId).catch(() => null);
 
       const fallbackParticipants = new Map<string, RealtimeParticipantPresence>();
       const addFallbackParticipant = (participant: MeetingParticipantLike) => {

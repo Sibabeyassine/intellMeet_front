@@ -22,6 +22,8 @@ export function NewMeetingModal() {
   const create = useMeetingsStore(s => s.create);
   const members = useProjectsStore(s => s.members);
   const fetchProjects = useProjectsStore(s => s.fetchAll);
+  const currentTeamId = useProjectsStore(s => s.currentTeamId);
+  const teams = useProjectsStore(s => s.teams);
   const user = useUser();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -60,15 +62,20 @@ export function NewMeetingModal() {
         ? new Date()
         : new Date(String(fd.get("scheduledAt") ?? new Date().toISOString()));
       const participantIds = Array.from(new Set([
-        ...(user?.id ? [user.id] : []),
         ...selectedParticipantIds
       ]));
+      const workspaceId = currentTeamId ?? teams[0]?.id;
+      if (!workspaceId) {
+        toast.error("Crée ou sélectionne une équipe avant de démarrer une réunion.");
+        return;
+      }
       const participantEmails = activeMembers
         .filter((member) => selectedParticipantIds.includes(member.userId) && member.email)
         .map((member) => member.email as string);
       const meeting = await create({
         title,
         description: String(fd.get("description") ?? ""),
+        workspaceId,
         scheduledAt: scheduledAt.toISOString(),
         durationMin,
         participantIds,
