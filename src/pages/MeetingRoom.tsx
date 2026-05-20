@@ -798,11 +798,13 @@ const MeetingRoom = () => {
       }
     };
 
-    socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
-      if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
-      transcriptTextRef.current = payload.transcript;
-      setTranscript(payload.transcript ? [transcriptLineFromText(payload.transcript, payload.updatedBy?.name ?? "Transcription")] : []);
-    });
+    if (socket) {
+      socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
+        if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
+        transcriptTextRef.current = payload.transcript;
+        setTranscript(payload.transcript ? [transcriptLineFromText(payload.transcript, payload.updatedBy?.name ?? "Transcription")] : []);
+      });
+    }
 
     void syncPersistentPresence().catch(() => undefined);
     const presenceInterval = window.setInterval(() => {
