@@ -1021,7 +1021,8 @@ const chat: ChatAPI = {
 
     socket.on("connect", () => {
       socket.emit("meeting:join", {
-        meetingId: channelId
+        meetingId: channelId,
+        presence: "chat"
       });
     });
 
