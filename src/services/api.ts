@@ -18,6 +18,7 @@ import type {
   LoginPayload,
   MediaFile,
   Meeting,
+  MeetingPresenceParticipant,
   MeetingSummary,
   Notification,
   Project,
@@ -55,6 +56,9 @@ export interface MeetingsAPI {
   update(id: ID, patch: Partial<Meeting>): Promise<Meeting>;
   delete(id: ID): Promise<void>;
   getSummary(id: ID): Promise<MeetingSummary | null>;
+  touchPresence(id: ID): Promise<MeetingPresenceParticipant[]>;
+  listPresence(id: ID): Promise<MeetingPresenceParticipant[]>;
+  leavePresence(id: ID): Promise<void>;
   getTranscript(id: ID): Promise<TranscriptLine[]>;
   getActionItems(id: ID): Promise<ActionItem[]>;
   // realtime hooks
