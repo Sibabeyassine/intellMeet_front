@@ -217,18 +217,39 @@ const MeetingRoom = () => {
     }).catch(() => undefined);
   }, [meetingId]);
 
-  const renegotiatePeers = useCallback(async () => {
-    if (!meetingId) return;
+  const syncPeerOutgoingTracks = useCallback(async (
+    remoteUserId: string,
+    peer: RTCPeerConnection,
+    stream: MediaStream
+  ) => {
+    const audioTrack = stream.getAudioTracks()[0] ?? null;
+    const videoTrack = screenSharing
+      ? (screenTrackRef.current ?? stream.getVideoTracks()[0] ?? null)
+      : cameraOn
+        ? (cameraTrackRef.current ?? stream.getVideoTracks()[0] ?? null)
+        : null;
 
-    await Promise.all(
-      Object.entries(peersRef.current).map(async ([remoteUserId, peer]) => {
-        if (peer.signalingState !== "stable") return;
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-        sendSignalTo(remoteUserId, offer);
-      })
-    ).catch(() => undefined);
-  }, [meetingId, sendSignalTo]);
+    const audioSender = peer.getSenders().find((sender) => sender.track?.kind === "audio");
+    if (audioTrack && !audioSender) {
+      peer.addTrack(audioTrack, stream);
+    } else if (audioTrack && audioSender?.track?.id !== audioTrack.id) {
+      await audioSender.replaceTrack(audioTrack);
+    }
+
+    const videoSender = peer.getSenders().find((sender) => sender.track?.kind === "video");
+    if (videoTrack && !videoSender) {
+      peer.addTrack(videoTrack, stream);
+    } else if (videoTrack && videoSender?.track?.id !== videoTrack.id) {
+      await videoSender.replaceTrack(videoTrack);
+    } else if (!videoTrack && videoSender?.track) {
+      await videoSender.replaceTrack(null);
+    }
+
+    if (peer.signalingState !== "stable") return;
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    sendSignalTo(remoteUserId, offer);
+  }, [cameraOn, screenSharing, sendSignalTo]);
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
@@ -245,27 +266,13 @@ const MeetingRoom = () => {
     if (!localStream || !meetingId) return;
 
     void Promise.all(
-      Object.entries(peersRef.current).map(async ([remoteUserId, peer]) => {
-        localStream.getTracks().forEach((track) => {
-          const alreadySendingKind = peer
-            .getSenders()
-            .some((sender) => sender.track?.kind === track.kind);
-
-          if (!alreadySendingKind) {
-            peer.addTrack(track, localStream);
-          }
-        });
-
-        if (peer.signalingState !== "stable") return;
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-        sendSignalTo(remoteUserId, offer);
-      })
+      Object.entries(peersRef.current).map(([remoteUserId, peer]) =>
+        syncPeerOutgoingTracks(remoteUserId, peer, localStream)
+      )
     ).catch(() => undefined);
 
     emitMediaState();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localStream, meetingId]);
+  }, [cameraOn, emitMediaState, localStream, meetingId, screenSharing, syncPeerOutgoingTracks]);
 
   useEffect(() => {
     mediaStateRef.current = { micOn, cameraOn, screenSharing };
@@ -490,7 +497,22 @@ const MeetingRoom = () => {
       const peer = new RTCPeerConnection(rtcConfig);
       peersRef.current[remoteUserId] = peer;
       const stream = localStreamRef.current;
-      stream?.getTracks().forEach((track) => peer.addTrack(track, stream));
+      if (stream) {
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) {
+          peer.addTrack(audioTrack, stream);
+        }
+
+        const videoTrack = screenSharing
+          ? (screenTrackRef.current ?? stream.getVideoTracks()[0])
+          : cameraOn
+            ? (cameraTrackRef.current ?? stream.getVideoTracks()[0])
+            : null;
+
+        if (videoTrack) {
+          peer.addTrack(videoTrack, stream);
+        }
+      }
 
       peer.onicecandidate = (event) => {
         if (event.candidate) sendSignalTo(remoteUserId, event.candidate.toJSON());
@@ -898,7 +920,7 @@ const MeetingRoom = () => {
       setPresentParticipants([]);
       setRemoteParticipants([]);
     };
-  }, [emitMediaState, joinedMeetingId, meetingId, sendSignalTo, transcriptLineFromText, user]);
+  }, [cameraOn, emitMediaState, joinedMeetingId, meetingId, screenSharing, sendSignalTo, transcriptLineFromText, user]);
 
   // The room should show people who are actually present, not everyone invited.
   const participants = useMemo(() => {
@@ -1049,7 +1071,6 @@ const MeetingRoom = () => {
       stream.getVideoTracks().forEach((track) => { track.enabled = next; });
       setCameraOn(next);
       emitMediaState({ cameraOn: next });
-      void renegotiatePeers();
     } catch {
       toast.error("Impossible d'activer la caméra. Vérifie les permissions du navigateur.");
     }
