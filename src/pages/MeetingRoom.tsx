@@ -426,8 +426,21 @@ const MeetingRoom = () => {
       sendSignalTo(remoteUserId, offer);
     };
 
+    const announcePresence = () => {
+      socket.emit("meeting:presence", { meetingId });
+      const mediaState = mediaStateRef.current;
+      socket.emit("meeting:media-state", {
+        meetingId,
+        micOn: mediaState.micOn,
+        cameraOn: mediaState.cameraOn,
+        screenSharing: mediaState.screenSharing
+      });
+    };
+
+    let presenceInterval: number | undefined;
+
     socket.on("connect", () => {
-      socket.emit("meeting:join", { meetingId });
+      socket.emit("meeting:join", { meetingId, presence: "room" });
     });
 
     socket.on("meeting:joined", (payload: { participants?: RealtimeParticipantPresence[] }) => {
@@ -443,6 +456,7 @@ const MeetingRoom = () => {
         cameraOn: mediaState.cameraOn,
         screenSharing: mediaState.screenSharing
       });
+      announcePresence();
     });
 
     socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
@@ -484,6 +498,14 @@ const MeetingRoom = () => {
       );
     });
 
+    socket.on("participant:presence", (payload: RealtimeParticipantPresence) => {
+      if (payload.userId === user.id) return;
+      upsertPresence(payload);
+      if (!peersRef.current[payload.userId] && user.id > payload.userId) {
+        void initiatePeerOffer(payload.userId).catch(() => undefined);
+      }
+    });
+
     socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
       if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
       transcriptTextRef.current = payload.transcript;
@@ -523,7 +545,10 @@ const MeetingRoom = () => {
       if (payload.message) toast.error(payload.message);
     });
 
+    presenceInterval = window.setInterval(announcePresence, 3000);
+
     return () => {
+      if (presenceInterval) window.clearInterval(presenceInterval);
       socket.disconnect();
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
