@@ -19,6 +19,9 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const WS_URL = resolveRealtimeUrl();
+const REALTIME_DISABLED =
+  import.meta.env.VITE_DISABLE_REALTIME === "true" ||
+  /vercel\.app$/i.test(new URL(WS_URL).hostname);
 const SESSION_KEY = "intellmeet.http.session";
 const parseIceServers = (): RTCIceServer[] => {
   const value = import.meta.env.VITE_RTC_ICE_SERVERS;
@@ -393,7 +396,7 @@ const MeetingRoom = () => {
     const token = readAccessToken();
     if (!token) return;
 
-    const socket = io(WS_URL, { auth: { token } });
+    const socket = REALTIME_DISABLED ? null : io(WS_URL, { auth: { token } });
     socketRef.current = socket;
 
     const upsertRemote = (participant: RemoteParticipant) => {
@@ -577,7 +580,6 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const activeParticipants = await api.meetings.touchPresence(meetingId);
       const freshMeeting = await api.meetings.get(meetingId).catch(() => null);
 
       const fallbackParticipants = new Map<string, RealtimeParticipantPresence>();
@@ -604,6 +606,11 @@ const MeetingRoom = () => {
           });
         });
       }
+
+      await api.meetings.touchPresence(meetingId).catch(() => undefined);
+      const activeParticipants = await api.meetings
+        .listPresence(meetingId)
+        .catch(() => []);
 
       const reliableParticipants = [
         ...activeParticipants
@@ -641,102 +648,112 @@ const MeetingRoom = () => {
       );
     };
 
-    socket.on("connect", () => {
-      socket.emit("meeting:join", {
-        meetingId,
-        presence: "room",
-        userId: user.id,
-        name: user.fullName,
-        email: user.email
+    if (socket) {
+      socket.on("connect", () => {
+        socket.emit("meeting:join", {
+          meetingId,
+          presence: "room",
+          userId: user.id,
+          name: user.fullName,
+          email: user.email
+        });
+        announcePresence();
       });
-      announcePresence();
-    });
 
-    socket.on("meeting:joined", (payload: {
-      participants?: RealtimeParticipantPresence[];
-      waiting?: boolean;
-      status?: string;
-    }) => {
-      if (payload.waiting) {
-        return;
-      }
+      socket.on("meeting:joined", (payload: {
+        participants?: RealtimeParticipantPresence[];
+        waiting?: boolean;
+        status?: string;
+      }) => {
+        if (payload.waiting) {
+          return;
+        }
 
-      payload.participants?.forEach((participant) => {
-        if (participant.userId === user.id) return;
-        upsertPresence(participant);
-        maybeInitiatePeerOffer(participant.userId);
+        payload.participants?.forEach((participant) => {
+          if (participant.userId === user.id) return;
+          upsertPresence(participant);
+          maybeInitiatePeerOffer(participant.userId);
+        });
+        const mediaState = mediaStateRef.current;
+        socket.emit("meeting:media-state", {
+          meetingId,
+          micOn: mediaState.micOn,
+          cameraOn: mediaState.cameraOn,
+          screenSharing: mediaState.screenSharing
+        });
+        announcePresence();
+        void syncPersistentPresence().catch(() => undefined);
       });
-      const mediaState = mediaStateRef.current;
-      socket.emit("meeting:media-state", {
-        meetingId,
-        micOn: mediaState.micOn,
-        cameraOn: mediaState.cameraOn,
-        screenSharing: mediaState.screenSharing
+
+      socket.on("meeting:started", (payload: { meetingId?: string }) => {
+        if (payload.meetingId && payload.meetingId !== meetingId) return;
+
+        void api.meetings.get(meetingId)
+          .then((freshMeeting) => {
+            setMeeting(freshMeeting);
+            autoEndedRef.current = false;
+            setSessionExpired(false);
+          })
+          .catch(() => undefined);
       });
-      announcePresence();
-      void syncPersistentPresence().catch(() => undefined);
-    });
 
-    socket.on("meeting:started", (payload: { meetingId?: string }) => {
-      if (payload.meetingId && payload.meetingId !== meetingId) return;
+      socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
+        if (payload.userId === user.id) return;
+        upsertPresence(payload);
+        maybeInitiatePeerOffer(payload.userId);
+        emitMediaState();
+      });
 
-      void api.meetings.get(meetingId)
-        .then((freshMeeting) => {
-          setMeeting(freshMeeting);
-          autoEndedRef.current = false;
-          setSessionExpired(false);
-        })
-        .catch(() => undefined);
-    });
+      socket.on("participant:left", (payload: { userId: string }) => {
+        removeRemote(payload.userId);
+      });
 
-    socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
-      if (payload.userId === user.id) return;
-      upsertPresence(payload);
-      maybeInitiatePeerOffer(payload.userId);
-      emitMediaState();
-    });
+      socket.on("participant:media-state", (payload: MediaStatePayload) => {
+        if (payload.userId === user.id) return;
+        remoteSeenAtRef.current[payload.userId] = Date.now();
+        setRemoteParticipants((current) =>
+          current.some((participant) => participant.id === payload.userId)
+            ? current.map((participant) =>
+                participant.id === payload.userId
+                  ? {
+                      ...participant,
+                      isMuted: !payload.micOn,
+                      isCameraOn: payload.cameraOn || payload.screenSharing,
+                      isScreenSharing: payload.screenSharing
+                    }
+                  : participant
+              )
+            : [
+                ...current,
+                {
+                  id: payload.userId,
+                  name: "Participant",
+                  initials: "PT",
+                  color: "265 70% 60%",
+                  isMuted: !payload.micOn,
+                  isCameraOn: payload.cameraOn || payload.screenSharing,
+                  isScreenSharing: payload.screenSharing
+                }
+              ]
+        );
+      });
 
-    socket.on("participant:left", (payload: { userId: string }) => {
-      removeRemote(payload.userId);
-    });
+      socket.on("participant:presence", (payload: RealtimeParticipantPresence) => {
+        if (payload.userId === user.id) return;
+        upsertPresence(payload);
+        maybeInitiatePeerOffer(payload.userId);
+      });
 
-    socket.on("participant:media-state", (payload: MediaStatePayload) => {
-      if (payload.userId === user.id) return;
-      remoteSeenAtRef.current[payload.userId] = Date.now();
-      setRemoteParticipants((current) =>
-        current.some((participant) => participant.id === payload.userId)
-          ? current.map((participant) =>
-              participant.id === payload.userId
-                ? {
-                    ...participant,
-                    isMuted: !payload.micOn,
-                    isCameraOn: payload.cameraOn || payload.screenSharing,
-                    isScreenSharing: payload.screenSharing
-                  }
-                : participant
-            )
-          : [
-              ...current,
-              {
-                id: payload.userId,
-                name: "Participant",
-                initials: "PT",
-                color: "265 70% 60%",
-                isMuted: !payload.micOn,
-                isCameraOn: payload.cameraOn || payload.screenSharing,
-                isScreenSharing: payload.screenSharing
-              }
-            ]
-      );
-    });
+      socket.on("meeting:participants", syncRoomParticipants);
 
-    socket.on("participant:presence", (payload: RealtimeParticipantPresence) => {
-      if (payload.userId === user.id) return;
-      upsertPresence(payload);
-      maybeInitiatePeerOffer(payload.userId);
-    });
+      socket.on("meeting:signal", (payload: RealtimeSignal) => {
+        void handleMeetingSignal(payload);
+      });
 
-    socket.on("meeting:participants", syncRoomParticipants);
+      socket.on("realtime:error", (payload: { message?: string }) => {
+        if (payload.message) toast.error(payload.message);
+      });
+    }
 
     const handleMeetingSignal = async (payload: RealtimeSignal | MeetingSignal) => {
       if ("id" in payload) {
@@ -787,19 +804,18 @@ const MeetingRoom = () => {
       setTranscript(payload.transcript ? [transcriptLineFromText(payload.transcript, payload.updatedBy?.name ?? "Transcription")] : []);
     });
 
-    socket.on("meeting:signal", (payload: RealtimeSignal) => {
-      void handleMeetingSignal(payload);
-    });
-
-    socket.on("realtime:error", (payload: { message?: string }) => {
-      if (payload.message) toast.error(payload.message);
-    });
-
     void syncPersistentPresence().catch(() => undefined);
     const presenceInterval = window.setInterval(() => {
-      announcePresence();
+      if (socket) {
+        announcePresence();
+      }
       void syncPersistentPresence().catch(() => undefined);
-    }, 3000);
+    }, REALTIME_DISABLED ? 1500 : 3000);
+    const meetingInterval = window.setInterval(() => {
+      void api.meetings.get(meetingId).then((freshMeeting) => {
+        setMeeting(freshMeeting);
+      }).catch(() => undefined);
+    }, REALTIME_DISABLED ? 1500 : 5000);
     const signalInterval = window.setInterval(() => {
       void api.meetings
         .listSignals(meetingId, lastSignalAtRef.current)
@@ -809,9 +825,10 @@ const MeetingRoom = () => {
 
     return () => {
       window.clearInterval(presenceInterval);
+      window.clearInterval(meetingInterval);
       window.clearInterval(signalInterval);
       void api.meetings.leavePresence(meetingId);
-      socket.disconnect();
+      socket?.disconnect();
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
       pendingIceCandidatesRef.current = {};
