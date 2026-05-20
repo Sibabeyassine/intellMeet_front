@@ -7,7 +7,7 @@ import { ParticipantTile } from "@/features/meeting/ParticipantTile";
 import { MeetingControls } from "@/features/meeting/MeetingControls";
 import { MeetingSidebar } from "@/features/meeting/MeetingSidebar";
 import { AIPanel } from "@/features/meeting/AIPanel";
-import { api, type ActionItem, type AISuggestion, type Meeting, type MeetingSummary, type Participant, type TranscriptLine } from "@/services";
+import { api, type ActionItem, type AISuggestion, type Meeting, type MeetingSignal, type MeetingSummary, type Participant, type TranscriptLine } from "@/services";
 import { useUser } from "@/store/auth";
 import { useMeetingsStore } from "@/store/meetings";
 import { Logo } from "@/components/Logo";
@@ -173,6 +173,8 @@ const MeetingRoom = () => {
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  const lastSignalAtRef = useRef<string | undefined>(undefined);
+  const processedSignalIdsRef = useRef<Set<string>>(new Set());
   const remoteSeenAtRef = useRef<Record<string, number>>({});
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -196,12 +198,18 @@ const MeetingRoom = () => {
     targetUserId: string,
     signal: RTCSessionDescriptionInit | RTCIceCandidateInit
   ) => {
-    if (!meetingId || !socketRef.current?.connected) return;
-    socketRef.current.emit("meeting:signal", {
-      meetingId,
+    if (!meetingId) return;
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("meeting:signal", {
+        meetingId,
+        targetUserId,
+        signal
+      });
+    }
+    void api.meetings.sendSignal(meetingId, {
       targetUserId,
       signal
-    });
+    }).catch(() => undefined);
   };
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
@@ -512,7 +520,7 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const [, freshMeeting] = await Promise.all([
+      const [activeParticipants, freshMeeting] = await Promise.all([
         api.meetings.touchPresence(meetingId),
         api.meetings.get(meetingId).catch(() => null)
       ]);
@@ -526,10 +534,25 @@ const MeetingRoom = () => {
         }
       }
 
+      activeParticipants.forEach((participant) => {
+        if (participant.userId === user.id) return;
+        upsertPresence({
+          userId: participant.userId,
+          name: participant.name,
+          email: participant.email
+        });
+        maybeInitiatePeerOffer(participant.userId);
+      });
+
       const activeRemoteIds = new Set(
-        Object.entries(remoteSeenAtRef.current)
+        [
+          ...Object.entries(remoteSeenAtRef.current)
           .filter(([, seenAt]) => Date.now() - seenAt < 10000)
-          .map(([participantId]) => participantId)
+            .map(([participantId]) => participantId),
+          ...activeParticipants
+            .filter((participant) => participant.userId !== user.id)
+            .map((participant) => participant.userId)
+        ]
       );
       setRemoteParticipants((current) =>
         current.filter((participant) => activeRemoteIds.has(participant.id))
@@ -606,13 +629,12 @@ const MeetingRoom = () => {
 
     socket.on("meeting:participants", syncRoomParticipants);
 
-    socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
-      if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
-      transcriptTextRef.current = payload.transcript;
-      setTranscript(payload.transcript ? [transcriptLineFromText(payload.transcript, payload.updatedBy?.name ?? "Transcription")] : []);
-    });
-
-    socket.on("meeting:signal", async (payload: RealtimeSignal) => {
+    const handleMeetingSignal = async (payload: RealtimeSignal | MeetingSignal) => {
+      if ("id" in payload) {
+        if (processedSignalIdsRef.current.has(payload.id)) return;
+        processedSignalIdsRef.current.add(payload.id);
+        lastSignalAtRef.current = payload.createdAt;
+      }
       if (payload.fromUserId === user.id) return;
       if (payload.targetUserId && payload.targetUserId !== user.id) return;
 
@@ -648,6 +670,16 @@ const MeetingRoom = () => {
       } catch (error) {
         console.error("Realtime signal failed", error);
       }
+    };
+
+    socket.on("meeting:transcript-updated", (payload: { meetingId?: string; transcript?: string; updatedBy?: { name?: string; email?: string } }) => {
+      if (payload.meetingId !== meetingId || typeof payload.transcript !== "string") return;
+      transcriptTextRef.current = payload.transcript;
+      setTranscript(payload.transcript ? [transcriptLineFromText(payload.transcript, payload.updatedBy?.name ?? "Transcription")] : []);
+    });
+
+    socket.on("meeting:signal", (payload: RealtimeSignal) => {
+      void handleMeetingSignal(payload);
     });
 
     socket.on("realtime:error", (payload: { message?: string }) => {
@@ -659,14 +691,23 @@ const MeetingRoom = () => {
       announcePresence();
       void syncPersistentPresence().catch(() => undefined);
     }, 3000);
+    const signalInterval = window.setInterval(() => {
+      void api.meetings
+        .listSignals(meetingId, lastSignalAtRef.current)
+        .then((signals) => Promise.all(signals.map(handleMeetingSignal)))
+        .catch(() => undefined);
+    }, 1000);
 
     return () => {
       window.clearInterval(presenceInterval);
+      window.clearInterval(signalInterval);
       void api.meetings.leavePresence(meetingId);
       socket.disconnect();
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
       pendingIceCandidatesRef.current = {};
+      processedSignalIdsRef.current = new Set();
+      lastSignalAtRef.current = undefined;
       setRemoteParticipants([]);
     };
   }, [meetingId, user]);

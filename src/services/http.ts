@@ -25,6 +25,7 @@ import type {
   ID,
   LoginPayload,
   Meeting,
+  MeetingSignal,
   MeetingSummary,
   MediaFile,
   Notification,
@@ -163,6 +164,17 @@ type BackendMeetingPresenceParticipant = {
   email?: string;
   avatarUrl?: string;
   lastSeenAt: string;
+};
+
+type BackendMeetingSignal = {
+  id: string;
+  meetingId: string;
+  fromUserId: string;
+  fromName?: string;
+  fromEmail?: string;
+  targetUserId: string;
+  signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
+  createdAt: string;
 };
 
 type BackendNotification = {
@@ -963,6 +975,28 @@ const meetings: MeetingsAPI = {
   },
   async leavePresence(id) {
     await client.delete(`/meetings/${id}/presence`).catch(() => undefined);
+  },
+  async sendSignal(id, payload) {
+    await unwrap<{ id: string }>(client.post(`/meetings/${id}/signals`, payload));
+  },
+  async listSignals(id, since) {
+    const signals = await unwrap<BackendMeetingSignal[]>(
+      client.get(`/meetings/${id}/signals`, {
+        params: since ? { since } : undefined,
+        headers: { "Cache-Control": "no-cache" }
+      })
+    );
+
+    return signals.map((signal): MeetingSignal => ({
+      id: signal.id,
+      meetingId: signal.meetingId,
+      fromUserId: signal.fromUserId,
+      fromName: signal.fromName,
+      fromEmail: signal.fromEmail,
+      targetUserId: signal.targetUserId,
+      signal: signal.signal,
+      createdAt: signal.createdAt
+    }));
   },
   async getTranscript(id) {
     const meeting = await unwrap<BackendMeeting>(client.get(`/meetings/${id}`));
