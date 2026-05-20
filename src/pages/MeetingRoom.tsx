@@ -605,8 +605,6 @@ const MeetingRoom = () => {
           return;
         }
 
-        freshMeeting.participants.forEach(addFallbackParticipant);
-        freshMeeting.joinedParticipants?.forEach(addFallbackParticipant);
         freshMeeting.liveParticipantIds?.forEach((participantId) => {
           if (participantId === user.id || fallbackParticipants.has(participantId)) return;
           const knownParticipant = [
@@ -819,7 +817,7 @@ const MeetingRoom = () => {
     };
   }, [emitMediaState, joinedMeetingId, meetingId, sendSignalTo, transcriptLineFromText, user]);
 
-  // The room should reflect the meeting roster even while realtime media is catching up.
+  // The room should show people who are actually present, not everyone invited.
   const participants = useMemo(() => {
     const fallbackParticipant: Participant = {
       id: user?.id ?? "current-user",
@@ -854,9 +852,10 @@ const MeetingRoom = () => {
     };
 
     if (meeting?.status === "live") {
-      meeting.invitedParticipants?.forEach(addKnownParticipant);
-      meeting.joinedParticipants?.forEach(addKnownParticipant);
-      meeting.participants.forEach(addKnownParticipant);
+      const liveParticipantIds = new Set(meeting.liveParticipantIds ?? []);
+      meeting.participants
+        .filter((participant) => liveParticipantIds.has(participant.id))
+        .forEach(addKnownParticipant);
       remoteParticipants.forEach((participant) => {
         if (participant.id === fallbackParticipant.id) return;
 
