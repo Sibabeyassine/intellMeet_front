@@ -185,6 +185,7 @@ const MeetingRoom = () => {
   const lastSignalAtRef = useRef<string | undefined>(undefined);
   const processedSignalIdsRef = useRef<Set<string>>(new Set());
   const remoteSeenAtRef = useRef<Record<string, number>>({});
+  const peerRetryAtRef = useRef<Record<string, number>>({});
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
@@ -428,10 +429,31 @@ const MeetingRoom = () => {
       });
     };
 
-    const removeRemote = (userId: string) => {
+    const closePeerFor = (userId: string) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
+      delete pendingIceCandidatesRef.current[userId];
+    };
+
+    const clearRemoteMedia = (userId: string) => {
+      setRemoteParticipants((current) =>
+        current.map((item) =>
+          item.id === userId
+            ? {
+                ...item,
+                stream: undefined,
+                isCameraOn: false,
+                isScreenSharing: false
+              }
+            : item
+        )
+      );
+    };
+
+    const removeRemote = (userId: string) => {
+      closePeerFor(userId);
       delete remoteSeenAtRef.current[userId];
+      delete peerRetryAtRef.current[userId];
       setRemoteParticipants((current) => current.filter((item) => item.id !== userId));
       setMeeting((current) =>
         current
@@ -479,8 +501,27 @@ const MeetingRoom = () => {
         }
       };
       peer.onconnectionstatechange = () => {
-        if (["closed", "failed", "disconnected"].includes(peer.connectionState)) {
-          removeRemote(remoteUserId);
+        const state = peer.connectionState;
+
+        if (state === "connected") {
+          delete peerRetryAtRef.current[remoteUserId];
+          return;
+        }
+
+        if (state === "disconnected") {
+          clearRemoteMedia(remoteUserId);
+          return;
+        }
+
+        if (state === "failed") {
+          closePeerFor(remoteUserId);
+          clearRemoteMedia(remoteUserId);
+
+          const lastRetryAt = peerRetryAtRef.current[remoteUserId] ?? 0;
+          if (Date.now() - lastRetryAt > 5000) {
+            peerRetryAtRef.current[remoteUserId] = Date.now();
+            window.setTimeout(() => maybeInitiatePeerOffer(remoteUserId), 500);
+          }
         }
       };
 
@@ -771,6 +812,7 @@ const MeetingRoom = () => {
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
       pendingIceCandidatesRef.current = {};
+      peerRetryAtRef.current = {};
       processedSignalIdsRef.current = new Set();
       lastSignalAtRef.current = undefined;
       setRemoteParticipants([]);
