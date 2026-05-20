@@ -605,6 +605,7 @@ const MeetingRoom = () => {
           return;
         }
 
+        freshMeeting.joinedParticipants?.forEach(addFallbackParticipant);
         freshMeeting.liveParticipantIds?.forEach((participantId) => {
           if (participantId === user.id || fallbackParticipants.has(participantId)) return;
           const knownParticipant = [
@@ -853,6 +854,7 @@ const MeetingRoom = () => {
 
     if (meeting?.status === "live") {
       const liveParticipantIds = new Set(meeting.liveParticipantIds ?? []);
+      meeting.joinedParticipants?.forEach(addKnownParticipant);
       meeting.participants
         .filter((participant) => liveParticipantIds.has(participant.id))
         .forEach(addKnownParticipant);
