@@ -15,10 +15,12 @@ import type {
   CreateTeamPayload,
   DashboardOverview,
   ID,
+  ISODate,
   LoginPayload,
   MediaFile,
   Meeting,
   MeetingPresenceParticipant,
+  MeetingSignal,
   MeetingSummary,
   Notification,
   Project,
@@ -59,6 +61,14 @@ export interface MeetingsAPI {
   touchPresence(id: ID): Promise<MeetingPresenceParticipant[]>;
   listPresence(id: ID): Promise<MeetingPresenceParticipant[]>;
   leavePresence(id: ID): Promise<void>;
+  sendSignal(
+    id: ID,
+    payload: {
+      targetUserId: ID;
+      signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
+    }
+  ): Promise<void>;
+  listSignals(id: ID, since?: ISODate): Promise<MeetingSignal[]>;
   getTranscript(id: ID): Promise<TranscriptLine[]>;
   getActionItems(id: ID): Promise<ActionItem[]>;
   // realtime hooks

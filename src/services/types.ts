@@ -83,6 +83,17 @@ export interface MeetingPresenceParticipant {
   lastSeenAt: ISODate;
 }
 
+export interface MeetingSignal {
+  id: ID;
+  meetingId: ID;
+  fromUserId: ID;
+  fromName?: string;
+  fromEmail?: string;
+  targetUserId: ID;
+  signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
+  createdAt: ISODate;
+}
+
 export interface TranscriptLine {
   id: ID;
   meetingId: ID;
