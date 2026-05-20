@@ -59,12 +59,20 @@ export function NewMeetingModal() {
       const scheduledAt = startNow
         ? new Date()
         : new Date(String(fd.get("scheduledAt") ?? new Date().toISOString()));
+      const participantIds = Array.from(new Set([
+        ...(user?.id ? [user.id] : []),
+        ...selectedParticipantIds
+      ]));
+      const participantEmails = activeMembers
+        .filter((member) => selectedParticipantIds.includes(member.userId) && member.email)
+        .map((member) => member.email as string);
       const meeting = await create({
         title,
         description: String(fd.get("description") ?? ""),
         scheduledAt: scheduledAt.toISOString(),
         durationMin,
-        participantIds: selectedParticipantIds,
+        participantIds,
+        participantEmails,
       });
       if (startNow) {
         await api.meetings.start(meeting.id);
