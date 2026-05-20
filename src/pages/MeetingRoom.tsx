@@ -8,6 +8,7 @@ import { MeetingControls } from "@/features/meeting/MeetingControls";
 import { MeetingSidebar } from "@/features/meeting/MeetingSidebar";
 import { AIPanel } from "@/features/meeting/AIPanel";
 import { api, type ActionItem, type AISuggestion, type Meeting, type MeetingSignal, type MeetingSummary, type Participant, type TranscriptLine } from "@/services";
+import { resolveRealtimeUrl } from "@/services/realtime";
 import { useUser } from "@/store/auth";
 import { useMeetingsStore } from "@/store/meetings";
 import { Logo } from "@/components/Logo";
@@ -17,21 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
-const resolveWsUrl = () => {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-
-  try {
-    const url = new URL(API_URL);
-    url.pathname = url.pathname.replace(/\/api\/?$/, "");
-    url.search = "";
-    url.hash = "";
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return "http://localhost:8000";
-  }
-};
-const WS_URL = resolveWsUrl();
+const WS_URL = resolveRealtimeUrl();
 const SESSION_KEY = "intellmeet.http.session";
 const parseIceServers = (): RTCIceServer[] => {
   const value = import.meta.env.VITE_RTC_ICE_SERVERS;

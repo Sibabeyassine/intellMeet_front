@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
 import { io, Socket } from "socket.io-client";
+import { resolveRealtimeUrl } from "./realtime";
 
 import type {
   API,
@@ -219,20 +220,7 @@ type BackendMediaFile = {
 };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
-const resolveWsUrl = () => {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-
-  try {
-    const url = new URL(API_URL);
-    url.pathname = url.pathname.replace(/\/api\/?$/, "");
-    url.search = "";
-    url.hash = "";
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return "http://localhost:8000";
-  }
-};
-const WS_URL = resolveWsUrl();
+const WS_URL = resolveRealtimeUrl();
 const SESSION_KEY = "intellmeet.http.session";
 const ACTIVE_WORKSPACE_KEY = "intellmeet.activeWorkspaceId";
 const ACTIVE_PROJECT_KEY = "intellmeet.activeProjectId";

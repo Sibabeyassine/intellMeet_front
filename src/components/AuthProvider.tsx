@@ -3,8 +3,9 @@ import { io, Socket } from "socket.io-client";
 import { useAuthStore } from "@/store/auth";
 import { useNotificationsStore } from "@/store/notifications";
 import { useProjectsStore } from "@/store/projects";
+import { resolveRealtimeUrl } from "@/services/realtime";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8000";
+const WS_URL = resolveRealtimeUrl();
 
 /**
  * Hydrates the session from storage on first mount and pulls notifications
