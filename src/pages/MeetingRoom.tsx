@@ -384,6 +384,14 @@ const MeetingRoom = () => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
       setRemoteParticipants((current) => current.filter((item) => item.id !== userId));
+      setMeeting((current) =>
+        current
+          ? {
+              ...current,
+              participants: current.participants.filter((item) => item.id !== userId)
+            }
+          : current
+      );
     };
 
     const peerFor = (remoteUserId: string) => {
@@ -460,10 +468,7 @@ const MeetingRoom = () => {
 
       if (freshMeeting) {
         setMeeting(freshMeeting);
-        const roomParticipants = [
-          ...freshMeeting.participants,
-          ...(freshMeeting.joinedParticipants ?? [])
-        ].filter(
+        const roomParticipants = freshMeeting.participants.filter(
           (participant, index, participants) =>
             participants.findIndex((item) => item.id === participant.id) === index
         );
@@ -642,8 +647,7 @@ const MeetingRoom = () => {
     };
     const knownParticipants = [
       ...remoteParticipants,
-      ...(meeting?.participants ?? []),
-      ...(meeting?.joinedParticipants ?? [])
+      ...(meeting?.participants ?? [])
     ].filter(
       (participant, index, participantList) =>
         participant.id !== fallbackParticipant.id &&
@@ -655,7 +659,6 @@ const MeetingRoom = () => {
     cameraOn,
     localStream,
     meeting?.hostId,
-    meeting?.joinedParticipants,
     meeting?.participants,
     micOn,
     remoteParticipants,
