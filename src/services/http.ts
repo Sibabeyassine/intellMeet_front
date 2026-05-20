@@ -895,11 +895,12 @@ const meetings: MeetingsAPI = {
     return mapMeeting(meeting);
   },
   async create(payload: CreateMeetingPayload) {
-    const workspaceId = (await ensureWorkspaceId()) ?? await createDefaultWorkspaceId();
+    const workspaceId = payload.workspaceId ?? (await ensureWorkspaceId()) ?? await createDefaultWorkspaceId();
     const startsAt = payload.scheduledAt;
     const endsAt = new Date(
       new Date(startsAt).getTime() + payload.durationMin * 60000
     ).toISOString();
+    setActiveWorkspaceId(workspaceId);
     const meeting = await unwrap<BackendMeeting>(
       client.post("/meetings", {
         workspaceId,

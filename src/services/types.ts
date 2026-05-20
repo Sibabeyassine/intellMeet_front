@@ -118,6 +118,7 @@ export interface ActionItem {
 export interface CreateMeetingPayload {
   title: string;
   description?: string;
+  workspaceId?: ID;
   scheduledAt: ISODate;
   durationMin: number;
   participantIds?: ID[];
