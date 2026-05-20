@@ -217,6 +217,19 @@ const MeetingRoom = () => {
     }).catch(() => undefined);
   }, [meetingId]);
 
+  const renegotiatePeers = useCallback(async () => {
+    if (!meetingId) return;
+
+    await Promise.all(
+      Object.entries(peersRef.current).map(async ([remoteUserId, peer]) => {
+        if (peer.signalingState !== "stable") return;
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        sendSignalTo(remoteUserId, offer);
+      })
+    ).catch(() => undefined);
+  }, [meetingId, sendSignalTo]);
+
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
   useEffect(() => {
@@ -485,9 +498,28 @@ const MeetingRoom = () => {
       peer.ontrack = (event) => {
         const [stream] = event.streams;
         if (stream) {
+          const updateRemoteVideoState = () => {
+            const hasLiveVideo = stream
+              .getVideoTracks()
+              .some((track) => track.readyState === "live" && !track.muted);
+            setRemoteParticipants((current) =>
+              current.map((item) =>
+                item.id === remoteUserId
+                  ? { ...item, isCameraOn: hasLiveVideo }
+                  : item
+              )
+            );
+          };
+
+          stream.getVideoTracks().forEach((track) => {
+            track.onmute = updateRemoteVideoState;
+            track.onunmute = updateRemoteVideoState;
+            track.onended = updateRemoteVideoState;
+          });
+
           const hasLiveVideo = stream
             .getVideoTracks()
-            .some((track) => track.readyState === "live");
+            .some((track) => track.readyState === "live" && !track.muted);
           setRemoteParticipants((current) => {
             const existing = current.find((item) => item.id === remoteUserId);
             const name = existing?.name ?? "Participant";
@@ -507,6 +539,7 @@ const MeetingRoom = () => {
               item.id === remoteUserId ? { ...item, ...nextParticipant } : item
             );
           });
+          updateRemoteVideoState();
         }
       };
       peer.onconnectionstatechange = () => {
@@ -1016,6 +1049,7 @@ const MeetingRoom = () => {
       stream.getVideoTracks().forEach((track) => { track.enabled = next; });
       setCameraOn(next);
       emitMediaState({ cameraOn: next });
+      void renegotiatePeers();
     } catch {
       toast.error("Impossible d'activer la caméra. Vérifie les permissions du navigateur.");
     }
