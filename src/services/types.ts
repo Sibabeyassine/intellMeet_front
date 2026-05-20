@@ -55,7 +55,12 @@ export interface Meeting {
   durationMin: number;
   status: MeetingStatus;
   hostId: ID;
+  participantIds?: ID[];
+  joinedParticipantIds?: ID[];
+  liveParticipantIds?: ID[];
   participants: Participant[];
+  invitedParticipants?: Participant[];
+  joinedParticipants?: Participant[];
   inviteUrl: string;
   recordingUrl?: string;
   transcript?: string;

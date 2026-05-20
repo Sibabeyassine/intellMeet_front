@@ -366,6 +366,20 @@ const MeetingRoom = () => {
       });
     };
 
+    const upsertMeetingParticipant = (participant: Participant) => {
+      if (participant.id === user.id) return;
+
+      upsertRemote({
+        id: participant.id,
+        name: participant.name,
+        initials: participant.initials,
+        color: participant.color,
+        isHost: participant.isHost,
+        isMuted: participant.isMuted ?? true,
+        isCameraOn: participant.isCameraOn ?? false
+      });
+    };
+
     const removeRemote = (userId: string) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
@@ -438,12 +452,28 @@ const MeetingRoom = () => {
     };
 
     const syncPersistentPresence = async () => {
-      const activeParticipants = await api.meetings.touchPresence(meetingId);
-      const activeRemoteIds = new Set(
-        activeParticipants
-          .filter((participant) => participant.userId !== user.id)
-          .map((participant) => participant.userId)
-      );
+      const [activeParticipants, freshMeeting] = await Promise.all([
+        api.meetings.touchPresence(meetingId),
+        api.meetings.get(meetingId).catch(() => null)
+      ]);
+      const activeRemoteIds = new Set<string>();
+
+      if (freshMeeting) {
+        setMeeting(freshMeeting);
+        freshMeeting.participants.forEach((participant) => {
+          if (participant.id === user.id) return;
+          activeRemoteIds.add(participant.id);
+          upsertMeetingParticipant(participant);
+
+          if (!peersRef.current[participant.id] && user.id > participant.id) {
+            void initiatePeerOffer(participant.id).catch(() => undefined);
+          }
+        });
+      }
+
+      activeParticipants.forEach((participant) => {
+        if (participant.userId !== user.id) activeRemoteIds.add(participant.userId);
+      });
 
       activeParticipants.forEach((participant) => {
         if (participant.userId === user.id) return;
