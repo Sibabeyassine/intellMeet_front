@@ -496,6 +496,7 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => {
     description: meeting.description,
     notes: meeting.notes,
     scheduledAt: meeting.startsAt,
+    endsAt: meeting.endsAt,
     durationMin: minutesBetween(meeting.startsAt, meeting.endsAt),
     status: mapMeetingStatus(meeting.status),
     hostId: meeting.hostId,

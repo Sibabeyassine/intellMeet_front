@@ -52,6 +52,7 @@ export interface Meeting {
   description?: string;
   notes?: string;
   scheduledAt: ISODate;
+  endsAt?: ISODate;
   durationMin: number;
   status: MeetingStatus;
   hostId: ID;

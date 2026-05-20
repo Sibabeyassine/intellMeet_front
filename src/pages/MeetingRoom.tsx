@@ -72,8 +72,6 @@ type MeetingParticipantsPayload = {
   participants?: RealtimeParticipantPresence[];
 };
 
-type MeetingParticipantLike = Pick<Participant, "id" | "name" | "initials" | "color" | "isHost">;
-
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 type SpeechRecognitionEvent = Event & {
   resultIndex: number;
@@ -136,13 +134,6 @@ function meetingIncludesUser(meeting: Meeting, userId: string) {
     meeting.invitedParticipants?.some((participant) => participant.id === userId) ||
     meeting.joinedParticipants?.some((participant) => participant.id === userId)
   );
-}
-
-function presenceFromParticipant(participant: MeetingParticipantLike): RealtimeParticipantPresence {
-  return {
-    userId: participant.id,
-    name: participant.name
-  };
 }
 
 const MeetingRoom = () => {
@@ -590,10 +581,6 @@ const MeetingRoom = () => {
       const freshMeeting = await api.meetings.get(meetingId).catch(() => null);
 
       const fallbackParticipants = new Map<string, RealtimeParticipantPresence>();
-      const addFallbackParticipant = (participant: MeetingParticipantLike) => {
-        if (participant.id === user.id) return;
-        fallbackParticipants.set(participant.id, presenceFromParticipant(participant));
-      };
 
       if (freshMeeting) {
         setMeeting(freshMeeting);
@@ -603,7 +590,6 @@ const MeetingRoom = () => {
           return;
         }
 
-        freshMeeting.joinedParticipants?.forEach(addFallbackParticipant);
         freshMeeting.liveParticipantIds?.forEach((participantId) => {
           if (participantId === user.id || fallbackParticipants.has(participantId)) return;
           const knownParticipant = [
@@ -666,7 +652,15 @@ const MeetingRoom = () => {
       announcePresence();
     });
 
-    socket.on("meeting:joined", (payload: { participants?: RealtimeParticipantPresence[] }) => {
+    socket.on("meeting:joined", (payload: {
+      participants?: RealtimeParticipantPresence[];
+      waiting?: boolean;
+      status?: string;
+    }) => {
+      if (payload.waiting) {
+        return;
+      }
+
       payload.participants?.forEach((participant) => {
         if (participant.userId === user.id) return;
         upsertPresence(participant);
@@ -681,6 +675,18 @@ const MeetingRoom = () => {
       });
       announcePresence();
       void syncPersistentPresence().catch(() => undefined);
+    });
+
+    socket.on("meeting:started", (payload: { meetingId?: string }) => {
+      if (payload.meetingId && payload.meetingId !== meetingId) return;
+
+      void api.meetings.get(meetingId)
+        .then((freshMeeting) => {
+          setMeeting(freshMeeting);
+          autoEndedRef.current = false;
+          setSessionExpired(false);
+        })
+        .catch(() => undefined);
     });
 
     socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
@@ -852,7 +858,6 @@ const MeetingRoom = () => {
 
     if (meeting?.status === "live") {
       const liveParticipantIds = new Set(meeting.liveParticipantIds ?? []);
-      meeting.joinedParticipants?.forEach(addKnownParticipant);
       meeting.participants
         .filter((participant) => liveParticipantIds.has(participant.id))
         .forEach(addKnownParticipant);
@@ -885,7 +890,11 @@ const MeetingRoom = () => {
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
   const meetingEndsAt = meeting
-    ? new Date(new Date(meeting.scheduledAt).getTime() + meeting.durationMin * 60000).getTime()
+    ? new Date(
+        meeting.endsAt ??
+        new Date(new Date(meeting.scheduledAt).getTime() + meeting.durationMin * 60000)
+          .toISOString()
+      ).getTime()
     : null;
   const remainingSeconds = meetingEndsAt
     ? Math.max(0, Math.ceil((meetingEndsAt - now) / 1000))
@@ -1032,7 +1041,11 @@ const MeetingRoom = () => {
         if (!freshMeeting) return;
         setMeeting(freshMeeting);
         const freshEndsAt = new Date(
-          new Date(freshMeeting.scheduledAt).getTime() + freshMeeting.durationMin * 60000
+          freshMeeting.endsAt ??
+          new Date(
+            new Date(freshMeeting.scheduledAt).getTime() +
+            freshMeeting.durationMin * 60000
+          ).toISOString()
         ).getTime();
         if (freshMeeting.status === "live" && freshEndsAt > Date.now()) {
           autoEndedRef.current = false;
