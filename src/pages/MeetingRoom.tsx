@@ -85,6 +85,8 @@ type MeetingParticipantsPayload = {
   participants?: RealtimeParticipantPresence[];
 };
 
+type MeetingParticipantLike = Pick<Participant, "id" | "name" | "initials" | "color" | "isHost">;
+
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 type SpeechRecognitionEvent = Event & {
   resultIndex: number;
@@ -147,6 +149,13 @@ function meetingIncludesUser(meeting: Meeting, userId: string) {
     meeting.invitedParticipants?.some((participant) => participant.id === userId) ||
     meeting.joinedParticipants?.some((participant) => participant.id === userId)
   );
+}
+
+function presenceFromParticipant(participant: MeetingParticipantLike): RealtimeParticipantPresence {
+  return {
+    userId: participant.id,
+    name: participant.name
+  };
 }
 
 const MeetingRoom = () => {
@@ -525,22 +534,10 @@ const MeetingRoom = () => {
       const roomParticipants = (payload.participants ?? []).filter(
         (participant) => participant.userId !== user.id
       );
-      const activeRemoteIds = new Set(roomParticipants.map((participant) => participant.userId));
 
       roomParticipants.forEach((participant) => {
         upsertPresence(participant);
         maybeInitiatePeerOffer(participant.userId);
-      });
-
-      setRemoteParticipants((current) =>
-        current.filter((participant) => activeRemoteIds.has(participant.id))
-      );
-      Object.keys(peersRef.current).forEach((participantId) => {
-        if (activeRemoteIds.has(participantId)) return;
-        peersRef.current[participantId]?.close();
-        delete peersRef.current[participantId];
-        delete pendingIceCandidatesRef.current[participantId];
-        delete remoteSeenAtRef.current[participantId];
       });
     };
 
@@ -566,6 +563,12 @@ const MeetingRoom = () => {
         api.meetings.get(meetingId).catch(() => null)
       ]);
 
+      const fallbackParticipants = new Map<string, RealtimeParticipantPresence>();
+      const addFallbackParticipant = (participant: MeetingParticipantLike) => {
+        if (participant.id === user.id) return;
+        fallbackParticipants.set(participant.id, presenceFromParticipant(participant));
+      };
+
       if (freshMeeting) {
         setMeeting(freshMeeting);
         if (freshMeeting.status !== "live") {
@@ -573,10 +576,39 @@ const MeetingRoom = () => {
           setRemoteParticipants([]);
           return;
         }
+
+        freshMeeting.participants.forEach(addFallbackParticipant);
+        freshMeeting.joinedParticipants?.forEach(addFallbackParticipant);
+        freshMeeting.liveParticipantIds?.forEach((participantId) => {
+          if (participantId === user.id || fallbackParticipants.has(participantId)) return;
+          const knownParticipant = [
+            ...freshMeeting.participants,
+            ...(freshMeeting.joinedParticipants ?? []),
+            ...(freshMeeting.invitedParticipants ?? [])
+          ].find((participant) => participant.id === participantId);
+
+          fallbackParticipants.set(participantId, {
+            userId: participantId,
+            name: knownParticipant?.name
+          });
+        });
       }
 
-      activeParticipants.forEach((participant) => {
+      const reliableParticipants = [
+        ...activeParticipants
+          .filter((participant) => participant.userId !== user.id)
+          .map((participant) => ({
+            userId: participant.userId,
+            name: participant.name,
+            email: participant.email
+          })),
+        ...fallbackParticipants.values()
+      ];
+      const activeParticipantIds = new Set<string>();
+
+      reliableParticipants.forEach((participant) => {
         if (participant.userId === user.id) return;
+        activeParticipantIds.add(participant.userId);
         upsertPresence({
           userId: participant.userId,
           name: participant.name,
@@ -590,9 +622,7 @@ const MeetingRoom = () => {
           ...Object.entries(remoteSeenAtRef.current)
           .filter(([, seenAt]) => Date.now() - seenAt < 10000)
             .map(([participantId]) => participantId),
-          ...activeParticipants
-            .filter((participant) => participant.userId !== user.id)
-            .map((participant) => participant.userId)
+          ...activeParticipantIds
         ]
       );
       setRemoteParticipants((current) =>
