@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, Users2, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight, Mail, ShieldCheck } from "lucide-react";
+import { Plus, Calendar as CalIcon, MessageSquare, Paperclip, Sparkles, UserPlus, Users2, LayoutGrid, List as ListIcon, ChevronLeft, ChevronRight, Mail, ShieldCheck, Image as ImageIcon, FileText, Link2, Users, Video, ExternalLink, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameDay, isSameMonth, addMonths, subMonths } from "date-fns";
 import { AppShell } from "@/components/app/AppShell";
@@ -12,13 +12,6 @@ import { cn } from "@/lib/utils";
 import { useProjectsStore, useCurrentProject } from "@/store/projects";
 import { useUIStore } from "@/store/ui";
 import type { Task, TaskStatus, Team, TeamMember } from "@/services";
-import type { Task, TaskStatus, Team } from "@/services";
-import { useCurrentProject, useProjectsStore } from "@/store/projects";
-import { useUIStore } from "@/store/ui";
-import { addDays, addMonths, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, subMonths } from "date-fns";
-import { Calendar as CalIcon, ChevronLeft, ChevronRight, LayoutGrid, List as ListIcon, MessageSquare, Paperclip, Plus, Sparkles, UserPlus, Users2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 type ViewMode = "kanban" | "list" | "calendar" | "members";
 
