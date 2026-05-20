@@ -876,7 +876,7 @@ const MeetingRoom = () => {
       color: user?.color ?? "221 83% 53%",
       isYou: true,
       isHost: meeting?.hostId === user?.id,
-      isSpeaking: true,
+      isSpeaking: micOn,
       isMuted: !micOn,
       isCameraOn: cameraOn || screenSharing,
       isScreenSharing: screenSharing,
@@ -941,7 +941,22 @@ const MeetingRoom = () => {
     screenSharing,
     user
   ]);
-  const mainSpeaker = participants.find(p => p.isSpeaking) ?? participants[0];
+  const participantHasVisibleVideo = (participant: Participant) =>
+    Boolean(
+      participant.isCameraOn &&
+      participant.stream?.getVideoTracks().some(
+        (track) =>
+          track.readyState === "live" &&
+          track.enabled &&
+          !track.muted
+      )
+    );
+  const mainSpeaker =
+    participants.find((participant) => participant.isScreenSharing) ??
+    participants.find((participant) => !participant.isYou && participantHasVisibleVideo(participant)) ??
+    participants.find((participant) => participantHasVisibleVideo(participant)) ??
+    participants.find((participant) => participant.isSpeaking) ??
+    participants[0];
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
   const meetingEndsAt = meeting
