@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Copy, Lock, Mic, MicOff, Users } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { io, Socket } from "socket.io-client";
@@ -137,6 +137,18 @@ function initialsFor(name: string) {
     .toUpperCase() || "PT";
 }
 
+function meetingIncludesUser(meeting: Meeting, userId: string) {
+  return (
+    meeting.hostId === userId ||
+    meeting.participantIds?.includes(userId) ||
+    meeting.joinedParticipantIds?.includes(userId) ||
+    meeting.liveParticipantIds?.includes(userId) ||
+    meeting.participants.some((participant) => participant.id === userId) ||
+    meeting.invitedParticipants?.some((participant) => participant.id === userId) ||
+    meeting.joinedParticipants?.some((participant) => participant.id === userId)
+  );
+}
+
 const MeetingRoom = () => {
   const { t } = useTranslation();
   const { meetingId } = useParams();
@@ -169,6 +181,7 @@ const MeetingRoom = () => {
   const [screenSharing, setScreenSharing] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [renewingSession, setRenewingSession] = useState(false);
+  const [joinedMeetingId, setJoinedMeetingId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
@@ -180,7 +193,7 @@ const MeetingRoom = () => {
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
   const mediaStateRef = useRef({ micOn, cameraOn, screenSharing });
-  const emitMediaState = (
+  const emitMediaState = useCallback((
     state: { micOn?: boolean; cameraOn?: boolean; screenSharing?: boolean } = {}
   ) => {
     if (!meetingId || !socketRef.current?.connected) return;
@@ -192,9 +205,9 @@ const MeetingRoom = () => {
       cameraOn: mediaState.cameraOn,
       screenSharing: mediaState.screenSharing
     });
-  };
+  }, [meetingId]);
 
-  const sendSignalTo = (
+  const sendSignalTo = useCallback((
     targetUserId: string,
     signal: RTCSessionDescriptionInit | RTCIceCandidateInit
   ) => {
@@ -210,7 +223,7 @@ const MeetingRoom = () => {
       targetUserId,
       signal
     }).catch(() => undefined);
-  };
+  }, [meetingId]);
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
@@ -253,7 +266,7 @@ const MeetingRoom = () => {
     mediaStateRef.current = { micOn, cameraOn, screenSharing };
   }, [cameraOn, micOn, screenSharing]);
 
-  const transcriptLineFromText = (text: string, authorName = "Transcription"): TranscriptLine => ({
+  const transcriptLineFromText = useCallback((text: string, authorName = "Transcription"): TranscriptLine => ({
     id: `${meetingId ?? "meeting"}_transcript_live`,
     meetingId: meetingId ?? "",
     authorName,
@@ -261,7 +274,7 @@ const MeetingRoom = () => {
     color: "221 83% 53%",
     time: "Live",
     text
-  });
+  }), [meetingId]);
 
   const ensureLocalStream = async () => {
     if (localStream) return localStream;
@@ -326,8 +339,10 @@ const MeetingRoom = () => {
     };
   }, []);
 
+  const fallbackMeetingId = meetings[0]?.id;
+
   useEffect(() => {
-    const id = meetingId ?? meetings[0]?.id;
+    const id = meetingId ?? fallbackMeetingId;
     if (!id) return;
 
     if (!meetingId) {
@@ -340,10 +355,31 @@ const MeetingRoom = () => {
     setTranscript([]);
     setActionItems([]);
     setSuggestions([]);
+    setJoinedMeetingId(null);
     void (async () => {
-      const loadedMeeting = await api.meetings.join(id).catch(() => api.meetings.get(id));
+      let loadedMeeting: Meeting | null = null;
+      let joinError: unknown = null;
+
+      try {
+        loadedMeeting = await api.meetings.join(id);
+      } catch (error) {
+        joinError = error;
+        loadedMeeting = await api.meetings.get(id).catch(() => null);
+      }
+
       if (!alive || !loadedMeeting) return;
       setMeeting(loadedMeeting);
+
+      if (joinError && (!user?.id || !meetingIncludesUser(loadedMeeting, user.id))) {
+        toast.error(
+          joinError instanceof Error
+            ? joinError.message
+            : "Impossible de rejoindre cette réunion"
+        );
+        return;
+      }
+
+      setJoinedMeetingId(id);
       setSessionExpired(false);
 
       const [loadedSummary, loadedTranscript, loadedActions, loadedSuggestions] = await Promise.all([
@@ -361,10 +397,10 @@ const MeetingRoom = () => {
     })();
 
     return () => { alive = false; };
-  }, [meetingId, meetings, navigate, user?.id]);
+  }, [fallbackMeetingId, meetingId, navigate, user?.id]);
 
   useEffect(() => {
-    if (!meetingId || !user) return;
+    if (!meetingId || !user || joinedMeetingId !== meetingId) return;
 
     const token = readAccessToken();
     if (!token) return;
@@ -509,7 +545,12 @@ const MeetingRoom = () => {
     };
 
     const announcePresence = () => {
-      socket.emit("meeting:presence", { meetingId });
+      socket.emit("meeting:presence", {
+        meetingId,
+        userId: user.id,
+        name: user.fullName,
+        email: user.email
+      });
       const mediaState = mediaStateRef.current;
       socket.emit("meeting:media-state", {
         meetingId,
@@ -560,7 +601,14 @@ const MeetingRoom = () => {
     };
 
     socket.on("connect", () => {
-      socket.emit("meeting:join", { meetingId, presence: "room" });
+      socket.emit("meeting:join", {
+        meetingId,
+        presence: "room",
+        userId: user.id,
+        name: user.fullName,
+        email: user.email
+      });
+      announcePresence();
     });
 
     socket.on("meeting:joined", (payload: { participants?: RealtimeParticipantPresence[] }) => {
@@ -710,7 +758,7 @@ const MeetingRoom = () => {
       lastSignalAtRef.current = undefined;
       setRemoteParticipants([]);
     };
-  }, [meetingId, user]);
+  }, [emitMediaState, joinedMeetingId, meetingId, sendSignalTo, transcriptLineFromText, user]);
 
   // "you" reflects toggles
   const participants = useMemo(() => {
@@ -738,7 +786,7 @@ const MeetingRoom = () => {
     cameraOn,
     localStream,
     meeting?.hostId,
-    meeting?.participants,
+    meeting?.status,
     micOn,
     remoteParticipants,
     screenSharing,
