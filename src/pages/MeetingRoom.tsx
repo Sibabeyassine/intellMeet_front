@@ -460,7 +460,15 @@ const MeetingRoom = () => {
 
       if (freshMeeting) {
         setMeeting(freshMeeting);
-        freshMeeting.participants.forEach((participant) => {
+        const roomParticipants = [
+          ...freshMeeting.participants,
+          ...(freshMeeting.joinedParticipants ?? [])
+        ].filter(
+          (participant, index, participants) =>
+            participants.findIndex((item) => item.id === participant.id) === index
+        );
+
+        roomParticipants.forEach((participant) => {
           if (participant.id === user.id) return;
           activeRemoteIds.add(participant.id);
           upsertMeetingParticipant(participant);
@@ -632,11 +640,28 @@ const MeetingRoom = () => {
       isScreenSharing: screenSharing,
       stream: localStream ?? undefined
     };
-    return [
-      fallbackParticipant,
-      ...remoteParticipants.filter((p) => p.id !== fallbackParticipant.id)
-    ];
-  }, [cameraOn, localStream, meeting?.hostId, micOn, remoteParticipants, screenSharing, user]);
+    const knownParticipants = [
+      ...remoteParticipants,
+      ...(meeting?.participants ?? []),
+      ...(meeting?.joinedParticipants ?? [])
+    ].filter(
+      (participant, index, participantList) =>
+        participant.id !== fallbackParticipant.id &&
+        participantList.findIndex((item) => item.id === participant.id) === index
+    );
+
+    return [fallbackParticipant, ...knownParticipants];
+  }, [
+    cameraOn,
+    localStream,
+    meeting?.hostId,
+    meeting?.joinedParticipants,
+    meeting?.participants,
+    micOn,
+    remoteParticipants,
+    screenSharing,
+    user
+  ]);
   const mainSpeaker = participants.find(p => p.isSpeaking) ?? participants[0];
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
