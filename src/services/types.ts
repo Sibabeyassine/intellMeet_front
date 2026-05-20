@@ -70,6 +70,14 @@ export interface MeetingSummary {
   generatedAt: ISODate;
 }
 
+export interface MeetingPresenceParticipant {
+  userId: ID;
+  name: string;
+  email?: string;
+  avatarUrl?: string;
+  lastSeenAt: ISODate;
+}
+
 export interface TranscriptLine {
   id: ID;
   meetingId: ID;

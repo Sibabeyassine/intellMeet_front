@@ -437,7 +437,32 @@ const MeetingRoom = () => {
       });
     };
 
-    let presenceInterval: number | undefined;
+    const syncPersistentPresence = async () => {
+      const activeParticipants = await api.meetings.touchPresence(meetingId);
+      const activeRemoteIds = new Set(
+        activeParticipants
+          .filter((participant) => participant.userId !== user.id)
+          .map((participant) => participant.userId)
+      );
+
+      activeParticipants.forEach((participant) => {
+        if (participant.userId === user.id) return;
+
+        upsertPresence({
+          userId: participant.userId,
+          name: participant.name,
+          email: participant.email
+        });
+
+        if (!peersRef.current[participant.userId] && user.id > participant.userId) {
+          void initiatePeerOffer(participant.userId).catch(() => undefined);
+        }
+      });
+
+      setRemoteParticipants((current) =>
+        current.filter((participant) => activeRemoteIds.has(participant.id))
+      );
+    };
 
     socket.on("connect", () => {
       socket.emit("meeting:join", { meetingId, presence: "room" });
@@ -457,6 +482,7 @@ const MeetingRoom = () => {
         screenSharing: mediaState.screenSharing
       });
       announcePresence();
+      void syncPersistentPresence().catch(() => undefined);
     });
 
     socket.on("participant:joined", async (payload: { userId: string; name?: string; socketId?: string }) => {
@@ -545,10 +571,15 @@ const MeetingRoom = () => {
       if (payload.message) toast.error(payload.message);
     });
 
-    presenceInterval = window.setInterval(announcePresence, 3000);
+    void syncPersistentPresence().catch(() => undefined);
+    const presenceInterval = window.setInterval(() => {
+      announcePresence();
+      void syncPersistentPresence().catch(() => undefined);
+    }, 3000);
 
     return () => {
-      if (presenceInterval) window.clearInterval(presenceInterval);
+      window.clearInterval(presenceInterval);
+      void api.meetings.leavePresence(meetingId);
       socket.disconnect();
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
@@ -691,6 +722,9 @@ const MeetingRoom = () => {
   const leaveMeeting = async () => {
     stopRecording();
     stopScreenShare();
+    if (meeting?.id) {
+      await api.meetings.leavePresence(meeting.id).catch(() => undefined);
+    }
     socketRef.current?.disconnect();
     Object.values(peersRef.current).forEach((peer) => peer.close());
     peersRef.current = {};

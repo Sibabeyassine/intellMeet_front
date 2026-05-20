@@ -141,6 +141,14 @@ type BackendMeeting = {
   }>;
 };
 
+type BackendMeetingPresenceParticipant = {
+  userId: string;
+  name: string;
+  email?: string;
+  avatarUrl?: string;
+  lastSeenAt: string;
+};
+
 type BackendNotification = {
   id: string;
   type:
@@ -892,6 +900,23 @@ const meetings: MeetingsAPI = {
       decisions: [],
       generatedAt: new Date().toISOString()
     };
+  },
+  async touchPresence(id) {
+    const data = await unwrap<{ participants: BackendMeetingPresenceParticipant[] }>(
+      client.post(`/meetings/${id}/presence`)
+    );
+    return data.participants;
+  },
+  async listPresence(id) {
+    const data = await unwrap<{ participants: BackendMeetingPresenceParticipant[] }>(
+      client.get(`/meetings/${id}/presence`, {
+        headers: { "Cache-Control": "no-cache" }
+      })
+    );
+    return data.participants;
+  },
+  async leavePresence(id) {
+    await client.delete(`/meetings/${id}/presence`).catch(() => undefined);
   },
   async getTranscript(id) {
     const meeting = await unwrap<BackendMeeting>(client.get(`/meetings/${id}`));
