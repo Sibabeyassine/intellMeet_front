@@ -819,7 +819,7 @@ const MeetingRoom = () => {
     };
   }, [emitMediaState, joinedMeetingId, meetingId, sendSignalTo, transcriptLineFromText, user]);
 
-  // "you" reflects toggles
+  // The room should reflect the meeting roster even while realtime media is catching up.
   const participants = useMemo(() => {
     const fallbackParticipant: Participant = {
       id: user?.id ?? "current-user",
@@ -834,18 +834,49 @@ const MeetingRoom = () => {
       isScreenSharing: screenSharing,
       stream: localStream ?? undefined
     };
-    const knownParticipants = (meeting?.status === "live" ? remoteParticipants : []).filter(
-      (participant, index, participantList) =>
-        participant.id !== fallbackParticipant.id &&
-        participantList.findIndex((item) => item.id === participant.id) === index
-    );
+    const participantsById = new Map<string, Participant>();
+    const addKnownParticipant = (participant?: Participant) => {
+      if (
+        !participant ||
+        participant.id === fallbackParticipant.id ||
+        participantsById.has(participant.id)
+      ) {
+        return;
+      }
 
-    return [fallbackParticipant, ...knownParticipants];
+      participantsById.set(participant.id, {
+        ...participant,
+        isMuted: participant.isMuted ?? true,
+        isCameraOn: participant.isCameraOn ?? false,
+        isScreenSharing: participant.isScreenSharing ?? false,
+        isHost: participant.isHost ?? participant.id === meeting?.hostId
+      });
+    };
+
+    if (meeting?.status === "live") {
+      meeting.invitedParticipants?.forEach(addKnownParticipant);
+      meeting.joinedParticipants?.forEach(addKnownParticipant);
+      meeting.participants.forEach(addKnownParticipant);
+      remoteParticipants.forEach((participant) => {
+        if (participant.id === fallbackParticipant.id) return;
+
+        const knownParticipant = participantsById.get(participant.id);
+        participantsById.set(participant.id, {
+          ...knownParticipant,
+          ...participant,
+          isHost: participant.isHost ?? knownParticipant?.isHost ?? participant.id === meeting.hostId,
+          isMuted: participant.isMuted ?? knownParticipant?.isMuted ?? true,
+          isCameraOn: participant.isCameraOn ?? knownParticipant?.isCameraOn ?? false,
+          isScreenSharing: participant.isScreenSharing ?? knownParticipant?.isScreenSharing ?? false
+        });
+      });
+    }
+
+    return [fallbackParticipant, ...participantsById.values()];
   }, [
     cameraOn,
     localStream,
-    meeting?.hostId,
-    meeting?.status,
+    meeting,
     micOn,
     remoteParticipants,
     screenSharing,
