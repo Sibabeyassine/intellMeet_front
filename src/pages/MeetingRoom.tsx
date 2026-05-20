@@ -185,6 +185,7 @@ const MeetingRoom = () => {
   const lastSignalAtRef = useRef<string | undefined>(undefined);
   const processedSignalIdsRef = useRef<Set<string>>(new Set());
   const remoteSeenAtRef = useRef<Record<string, number>>({});
+  const peerRetryAtRef = useRef<Record<string, number>>({});
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
@@ -428,10 +429,31 @@ const MeetingRoom = () => {
       });
     };
 
-    const removeRemote = (userId: string) => {
+    const closePeerFor = (userId: string) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
+      delete pendingIceCandidatesRef.current[userId];
+    };
+
+    const clearRemoteMedia = (userId: string) => {
+      setRemoteParticipants((current) =>
+        current.map((item) =>
+          item.id === userId
+            ? {
+                ...item,
+                stream: undefined,
+                isCameraOn: false,
+                isScreenSharing: false
+              }
+            : item
+        )
+      );
+    };
+
+    const removeRemote = (userId: string) => {
+      closePeerFor(userId);
       delete remoteSeenAtRef.current[userId];
+      delete peerRetryAtRef.current[userId];
       setRemoteParticipants((current) => current.filter((item) => item.id !== userId));
       setMeeting((current) =>
         current
@@ -479,8 +501,27 @@ const MeetingRoom = () => {
         }
       };
       peer.onconnectionstatechange = () => {
-        if (["closed", "failed", "disconnected"].includes(peer.connectionState)) {
-          removeRemote(remoteUserId);
+        const state = peer.connectionState;
+
+        if (state === "connected") {
+          delete peerRetryAtRef.current[remoteUserId];
+          return;
+        }
+
+        if (state === "disconnected") {
+          clearRemoteMedia(remoteUserId);
+          return;
+        }
+
+        if (state === "failed") {
+          closePeerFor(remoteUserId);
+          clearRemoteMedia(remoteUserId);
+
+          const lastRetryAt = peerRetryAtRef.current[remoteUserId] ?? 0;
+          if (Date.now() - lastRetryAt > 5000) {
+            peerRetryAtRef.current[remoteUserId] = Date.now();
+            window.setTimeout(() => maybeInitiatePeerOffer(remoteUserId), 500);
+          }
         }
       };
 
@@ -564,8 +605,6 @@ const MeetingRoom = () => {
           return;
         }
 
-        freshMeeting.participants.forEach(addFallbackParticipant);
-        freshMeeting.joinedParticipants?.forEach(addFallbackParticipant);
         freshMeeting.liveParticipantIds?.forEach((participantId) => {
           if (participantId === user.id || fallbackParticipants.has(participantId)) return;
           const knownParticipant = [
@@ -771,13 +810,14 @@ const MeetingRoom = () => {
       Object.values(peersRef.current).forEach((peer) => peer.close());
       peersRef.current = {};
       pendingIceCandidatesRef.current = {};
+      peerRetryAtRef.current = {};
       processedSignalIdsRef.current = new Set();
       lastSignalAtRef.current = undefined;
       setRemoteParticipants([]);
     };
   }, [emitMediaState, joinedMeetingId, meetingId, sendSignalTo, transcriptLineFromText, user]);
 
-  // "you" reflects toggles
+  // The room should show people who are actually present, not everyone invited.
   const participants = useMemo(() => {
     const fallbackParticipant: Participant = {
       id: user?.id ?? "current-user",
@@ -792,18 +832,50 @@ const MeetingRoom = () => {
       isScreenSharing: screenSharing,
       stream: localStream ?? undefined
     };
-    const knownParticipants = (meeting?.status === "live" ? remoteParticipants : []).filter(
-      (participant, index, participantList) =>
-        participant.id !== fallbackParticipant.id &&
-        participantList.findIndex((item) => item.id === participant.id) === index
-    );
+    const participantsById = new Map<string, Participant>();
+    const addKnownParticipant = (participant?: Participant) => {
+      if (
+        !participant ||
+        participant.id === fallbackParticipant.id ||
+        participantsById.has(participant.id)
+      ) {
+        return;
+      }
 
-    return [fallbackParticipant, ...knownParticipants];
+      participantsById.set(participant.id, {
+        ...participant,
+        isMuted: participant.isMuted ?? true,
+        isCameraOn: participant.isCameraOn ?? false,
+        isScreenSharing: participant.isScreenSharing ?? false,
+        isHost: participant.isHost ?? participant.id === meeting?.hostId
+      });
+    };
+
+    if (meeting?.status === "live") {
+      const liveParticipantIds = new Set(meeting.liveParticipantIds ?? []);
+      meeting.participants
+        .filter((participant) => liveParticipantIds.has(participant.id))
+        .forEach(addKnownParticipant);
+      remoteParticipants.forEach((participant) => {
+        if (participant.id === fallbackParticipant.id) return;
+
+        const knownParticipant = participantsById.get(participant.id);
+        participantsById.set(participant.id, {
+          ...knownParticipant,
+          ...participant,
+          isHost: participant.isHost ?? knownParticipant?.isHost ?? participant.id === meeting.hostId,
+          isMuted: participant.isMuted ?? knownParticipant?.isMuted ?? true,
+          isCameraOn: participant.isCameraOn ?? knownParticipant?.isCameraOn ?? false,
+          isScreenSharing: participant.isScreenSharing ?? knownParticipant?.isScreenSharing ?? false
+        });
+      });
+    }
+
+    return [fallbackParticipant, ...participantsById.values()];
   }, [
     cameraOn,
     localStream,
-    meeting?.hostId,
-    meeting?.status,
+    meeting,
     micOn,
     remoteParticipants,
     screenSharing,
