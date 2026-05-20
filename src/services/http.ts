@@ -988,7 +988,7 @@ const meetings: MeetingsAPI = {
     });
 
     socket.on("connect", () => {
-      socket.emit("meeting:join", { meetingId: id });
+      socket.emit("meeting:join", { meetingId: id, presence: "chat" });
     });
 
     socket.on("meeting:notes-updated", (payload: unknown) => {
