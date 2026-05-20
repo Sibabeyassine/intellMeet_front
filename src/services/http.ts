@@ -122,7 +122,23 @@ type BackendMeeting = {
   status: "scheduled" | "live" | "completed" | "cancelled";
   hostId: string;
   participantIds?: string[];
+  joinedParticipantIds?: string[];
+  liveParticipantIds?: string[];
   participants?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    avatarUrl?: string;
+    isHost?: boolean;
+  }>;
+  invitedParticipants?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    avatarUrl?: string;
+    isHost?: boolean;
+  }>;
+  joinedParticipants?: Array<{
     id: string;
     name: string;
     email?: string;
@@ -470,7 +486,24 @@ const mapMeeting = (meeting: BackendMeeting): Meeting => {
     durationMin: minutesBetween(meeting.startsAt, meeting.endsAt),
     status: mapMeetingStatus(meeting.status),
     hostId: meeting.hostId,
+    participantIds: meeting.participantIds,
+    joinedParticipantIds: meeting.joinedParticipantIds,
+    liveParticipantIds: meeting.liveParticipantIds,
     participants: backendParticipants.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      initials: initialsFor(participant.name),
+      color: colorFor(participant.id),
+      isHost: participant.isHost ?? participant.id === meeting.hostId
+    })),
+    invitedParticipants: meeting.invitedParticipants?.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      initials: initialsFor(participant.name),
+      color: colorFor(participant.id),
+      isHost: participant.isHost ?? participant.id === meeting.hostId
+    })),
+    joinedParticipants: meeting.joinedParticipants?.map((participant) => ({
       id: participant.id,
       name: participant.name,
       initials: initialsFor(participant.name),
