@@ -13,6 +13,10 @@ export function ParticipantTile({ participant, className, isPinned }: Props) {
   const { name, initials, color, isSpeaking, isMuted, isCameraOn, isHost, isYou, isScreenSharing } = participant;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasLiveVideo = Boolean(
+    participant.stream?.getVideoTracks().some((track) => track.readyState === "live")
+  );
+  const showVideo = hasLiveVideo || Boolean(isCameraOn && participant.stream);
 
   useEffect(() => {
     if (videoRef.current && participant.stream) {
@@ -35,7 +39,7 @@ export function ParticipantTile({ participant, className, isPinned }: Props) {
       {!isYou && participant.stream && (
         <audio ref={audioRef} autoPlay playsInline className="hidden" />
       )}
-      {isCameraOn && participant.stream ? (
+      {showVideo && participant.stream ? (
         <video
           ref={videoRef}
           autoPlay
