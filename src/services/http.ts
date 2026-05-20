@@ -207,7 +207,20 @@ type BackendMediaFile = {
 };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8000";
+const resolveWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+
+  try {
+    const url = new URL(API_URL);
+    url.pathname = url.pathname.replace(/\/api\/?$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "http://localhost:8000";
+  }
+};
+const WS_URL = resolveWsUrl();
 const SESSION_KEY = "intellmeet.http.session";
 const ACTIVE_WORKSPACE_KEY = "intellmeet.activeWorkspaceId";
 const ACTIVE_PROJECT_KEY = "intellmeet.activeProjectId";
@@ -460,7 +473,7 @@ const minutesBetween = (start: string, end?: string) => {
 };
 
 const mapMeeting = (meeting: BackendMeeting): Meeting => {
-  const backendParticipants = meeting.participants?.length
+  const backendParticipants = Array.isArray(meeting.participants)
     ? meeting.participants
     : [
         {
