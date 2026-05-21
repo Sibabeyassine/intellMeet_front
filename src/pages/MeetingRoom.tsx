@@ -201,6 +201,10 @@ const MeetingRoom = () => {
   const [debugTick, setDebugTick] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
+  const peerSendersRef = useRef<Record<string, {
+    audio: RTCRtpSender | null;
+    video: RTCRtpSender | null;
+  }>>({});
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   const lastSignalAtRef = useRef<string | undefined>(undefined);
   const processedSignalIdsRef = useRef<Set<string>>(new Set());
@@ -279,20 +283,43 @@ const MeetingRoom = () => {
         ? (cameraTrackRef.current ?? stream.getVideoTracks()[0] ?? null)
         : null;
 
-    const audioSender = peer.getSenders().find((sender) => sender.track?.kind === "audio");
-    if (audioTrack && !audioSender) {
-      peer.addTrack(audioTrack, stream);
-    } else if (audioTrack && audioSender?.track?.id !== audioTrack.id) {
-      await audioSender.replaceTrack(audioTrack);
+    const senderState =
+      peerSendersRef.current[remoteUserId] ??
+      { audio: null, video: null };
+    peerSendersRef.current[remoteUserId] = senderState;
+
+    if (audioTrack && !senderState.audio) {
+      senderState.audio = peer.addTrack(audioTrack, stream);
+      bumpDebug();
+    } else if (
+      audioTrack &&
+      senderState.audio &&
+      senderState.audio.track?.id !== audioTrack.id
+    ) {
+      await senderState.audio.replaceTrack(audioTrack);
+      bumpDebug();
     }
 
-    const videoSender = peer.getSenders().find((sender) => sender.track?.kind === "video");
-    if (videoTrack && !videoSender) {
-      peer.addTrack(videoTrack, stream);
-    } else if (videoTrack && videoSender?.track?.id !== videoTrack.id) {
-      await videoSender.replaceTrack(videoTrack);
-    } else if (!videoTrack && videoSender?.track) {
-      await videoSender.replaceTrack(null);
+    if (videoTrack && !senderState.video) {
+      senderState.video = peer.addTrack(videoTrack, stream);
+      bumpDebug();
+    } else if (
+      videoTrack &&
+      senderState.video &&
+      senderState.video.track?.id !== videoTrack.id
+    ) {
+      await senderState.video.replaceTrack(videoTrack);
+      bumpDebug();
+    } else if (
+      videoTrack &&
+      senderState.video &&
+      !senderState.video.track
+    ) {
+      await senderState.video.replaceTrack(videoTrack);
+      bumpDebug();
+    } else if (!videoTrack && senderState.video?.track) {
+      await senderState.video.replaceTrack(null);
+      bumpDebug();
     }
 
     if (peer.connectionState === "closed" || peer.signalingState !== "stable") return;
@@ -326,7 +353,9 @@ const MeetingRoom = () => {
       Object.entries(peersRef.current).map(([remoteUserId, peer]) =>
         syncPeerOutgoingTracks(remoteUserId, peer, localStream)
       )
-    ).catch(() => undefined);
+    ).catch((error) => {
+      console.error("Outgoing track sync failed", error);
+    });
 
     emitMediaState();
   }, [cameraOn, emitMediaState, localStream, meetingId, screenSharing, syncPeerOutgoingTracks]);
@@ -514,6 +543,7 @@ const MeetingRoom = () => {
     const closePeerFor = (userId: string) => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
+      delete peerSendersRef.current[userId];
       delete pendingIceCandidatesRef.current[userId];
       delete makingOfferRef.current[userId];
       delete ignoreOfferRef.current[userId];
@@ -556,11 +586,12 @@ const MeetingRoom = () => {
 
       const peer = new RTCPeerConnection(rtcConfig);
       peersRef.current[remoteUserId] = peer;
+      peerSendersRef.current[remoteUserId] = { audio: null, video: null };
       const stream = localStreamRef.current;
       if (stream) {
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
-          peer.addTrack(audioTrack, stream);
+          peerSendersRef.current[remoteUserId].audio = peer.addTrack(audioTrack, stream);
         }
 
         const videoTrack = screenSharing
@@ -570,7 +601,7 @@ const MeetingRoom = () => {
             : null;
 
         if (videoTrack) {
-          peer.addTrack(videoTrack, stream);
+          peerSendersRef.current[remoteUserId].video = peer.addTrack(videoTrack, stream);
         }
       }
 
