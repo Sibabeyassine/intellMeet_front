@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
 import { io, Socket } from "socket.io-client";
-import { resolveRealtimeUrl } from "./realtime";
+import { isRealtimeEnabled, resolveRealtimeUrl } from "./realtime";
 
 import type {
   API,
@@ -221,6 +221,7 @@ type BackendMediaFile = {
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 const WS_URL = resolveRealtimeUrl();
+const REALTIME_ENABLED = isRealtimeEnabled();
 const SESSION_KEY = "intellmeet.http.session";
 const ACTIVE_WORKSPACE_KEY = "intellmeet.activeWorkspaceId";
 const ACTIVE_PROJECT_KEY = "intellmeet.activeProjectId";
@@ -1017,6 +1018,7 @@ const meetings: MeetingsAPI = {
     }));
   },
   subscribe(id, cb) {
+    if (!REALTIME_ENABLED) return () => {};
     const session = readSession();
     if (!session?.accessToken) return () => {};
 
@@ -1105,6 +1107,7 @@ const chat: ChatAPI = {
     };
   },
   subscribe(channelId, cb) {
+    if (!REALTIME_ENABLED) return () => {};
     const session = readSession();
     if (!session?.accessToken) return () => {};
 

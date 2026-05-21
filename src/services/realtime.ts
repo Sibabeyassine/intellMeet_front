@@ -16,6 +16,15 @@ const isRunningLocally = () => {
   return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(window.location.hostname);
 };
 
+const isServerlessHost = (value: string) => {
+  try {
+    const { hostname } = new URL(value);
+    return /vercel\.app$/i.test(hostname);
+  } catch {
+    return false;
+  }
+};
+
 export const resolveRealtimeUrl = () => {
   const configuredWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
 
@@ -32,4 +41,17 @@ export const resolveRealtimeUrl = () => {
   } catch {
     return configuredWsUrl ? trimTrailingSlash(configuredWsUrl) : "http://localhost:8000";
   }
+};
+
+export const isRealtimeEnabled = () => {
+  if (import.meta.env.VITE_DISABLE_REALTIME === "true") return false;
+
+  const configuredWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
+  if (configuredWsUrl && isServerlessHost(configuredWsUrl)) return false;
+  if (isServerlessHost(API_URL)) return false;
+
+  const realtimeUrl = resolveRealtimeUrl();
+  if (isServerlessHost(realtimeUrl)) return false;
+
+  return true;
 };
