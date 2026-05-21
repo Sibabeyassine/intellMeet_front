@@ -998,11 +998,9 @@ const MeetingRoom = () => {
   ]);
   const participantHasVisibleVideo = (participant: Participant) =>
     Boolean(
-      participant.isCameraOn &&
       participant.stream?.getVideoTracks().some(
         (track) =>
           track.readyState === "live" &&
-          track.enabled &&
           !track.muted
       )
     );

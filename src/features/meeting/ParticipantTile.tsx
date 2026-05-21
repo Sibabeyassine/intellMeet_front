@@ -17,11 +17,10 @@ export function ParticipantTile({ participant, className, isPinned }: Props) {
     participant.stream?.getVideoTracks().some(
       (track) =>
         track.readyState === "live" &&
-        track.enabled &&
         !track.muted
     )
   );
-  const showVideo = Boolean(participant.stream && isCameraOn && hasActiveVideo);
+  const showVideo = Boolean(participant.stream && hasActiveVideo);
 
   useEffect(() => {
     if (videoRef.current && participant.stream) {
