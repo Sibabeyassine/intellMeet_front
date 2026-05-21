@@ -75,6 +75,10 @@ type MeetingParticipantsPayload = {
   participants?: RealtimeParticipantPresence[];
 };
 
+type SignalKind = "offer" | "answer" | "candidate" | "unknown";
+
+type SignalDebugCounters = Record<SignalKind, number>;
+
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 type SpeechRecognitionEvent = Event & {
   resultIndex: number;
@@ -127,6 +131,27 @@ function initialsFor(name: string) {
     .toUpperCase() || "PT";
 }
 
+function classifySignal(signal: RTCSessionDescriptionInit | RTCIceCandidateInit): SignalKind {
+  if ("type" in signal) {
+    if (signal.type === "offer") return "offer";
+    if (signal.type === "answer") return "answer";
+  }
+  if ("candidate" in signal) return "candidate";
+  return "unknown";
+}
+
+function debugTrack(track?: MediaStreamTrack | null) {
+  if (!track) return null;
+
+  return {
+    kind: track.kind,
+    id: track.id,
+    enabled: track.enabled,
+    muted: track.muted,
+    readyState: track.readyState
+  };
+}
+
 function meetingIncludesUser(meeting: Meeting, userId: string) {
   return (
     meeting.hostId === userId ||
@@ -174,6 +199,7 @@ const MeetingRoom = () => {
   const [renewingSession, setRenewingSession] = useState(false);
   const [joinedMeetingId, setJoinedMeetingId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [debugTick, setDebugTick] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
@@ -185,6 +211,20 @@ const MeetingRoom = () => {
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
   const mediaStateRef = useRef({ micOn, cameraOn, screenSharing });
+  const signalDebugRef = useRef<{
+    sent: SignalDebugCounters;
+    received: SignalDebugCounters;
+    lastSent: { to: string; kind: SignalKind; at: string } | null;
+    lastReceived: { from: string; kind: SignalKind; at: string } | null;
+  }>({
+    sent: { offer: 0, answer: 0, candidate: 0, unknown: 0 },
+    received: { offer: 0, answer: 0, candidate: 0, unknown: 0 },
+    lastSent: null,
+    lastReceived: null
+  });
+  const bumpDebug = useCallback(() => {
+    setDebugTick((value) => value + 1);
+  }, []);
   const emitMediaState = useCallback((
     state: { micOn?: boolean; cameraOn?: boolean; screenSharing?: boolean } = {}
   ) => {
@@ -204,6 +244,14 @@ const MeetingRoom = () => {
     signal: RTCSessionDescriptionInit | RTCIceCandidateInit
   ) => {
     if (!meetingId) return;
+    const kind = classifySignal(signal);
+    signalDebugRef.current.sent[kind] += 1;
+    signalDebugRef.current.lastSent = {
+      to: targetUserId,
+      kind,
+      at: new Date().toISOString()
+    };
+    bumpDebug();
     if (socketRef.current?.connected) {
       socketRef.current.emit("meeting:signal", {
         meetingId,
@@ -215,7 +263,7 @@ const MeetingRoom = () => {
       targetUserId,
       signal
     }).catch(() => undefined);
-  }, [meetingId]);
+  }, [bumpDebug, meetingId]);
 
   const syncPeerOutgoingTracks = useCallback(async (
     remoteUserId: string,
@@ -515,7 +563,10 @@ const MeetingRoom = () => {
       }
 
       peer.onicecandidate = (event) => {
-        if (event.candidate) sendSignalTo(remoteUserId, event.candidate.toJSON());
+        if (event.candidate) {
+          sendSignalTo(remoteUserId, event.candidate.toJSON());
+          bumpDebug();
+        }
       };
       peer.ontrack = (event) => {
         const [stream] = event.streams;
@@ -562,10 +613,12 @@ const MeetingRoom = () => {
             );
           });
           updateRemoteVideoState();
+          bumpDebug();
         }
       };
       peer.onconnectionstatechange = () => {
         const state = peer.connectionState;
+        bumpDebug();
 
         if (state === "connected") {
           delete peerRetryAtRef.current[remoteUserId];
@@ -587,6 +640,15 @@ const MeetingRoom = () => {
             window.setTimeout(() => maybeInitiatePeerOffer(remoteUserId), 500);
           }
         }
+      };
+      peer.oniceconnectionstatechange = () => {
+        bumpDebug();
+      };
+      peer.onsignalingstatechange = () => {
+        bumpDebug();
+      };
+      peer.onicegatheringstatechange = () => {
+        bumpDebug();
       };
 
       return peer;
@@ -852,6 +914,14 @@ const MeetingRoom = () => {
 
       const peer = peerFor(payload.fromUserId);
       const signal = payload.signal;
+      const kind = classifySignal(signal);
+      signalDebugRef.current.received[kind] += 1;
+      signalDebugRef.current.lastReceived = {
+        from: payload.fromUserId,
+        kind,
+        at: new Date().toISOString()
+      };
+      bumpDebug();
 
       try {
         if ("type" in signal && signal.type === "offer") {
@@ -875,6 +945,7 @@ const MeetingRoom = () => {
         }
       } catch (error) {
         console.error("Realtime signal failed", error);
+        bumpDebug();
       }
     };
 
@@ -892,6 +963,7 @@ const MeetingRoom = () => {
         announcePresence();
       }
       void syncPersistentPresence().catch(() => undefined);
+      bumpDebug();
     }, REALTIME_DISABLED ? 1500 : 3000);
     const meetingInterval = window.setInterval(() => {
       void api.meetings.get(meetingId).then((freshMeeting) => {
@@ -903,6 +975,7 @@ const MeetingRoom = () => {
         .listSignals(meetingId, lastSignalAtRef.current)
         .then((signals) => Promise.all(signals.map(handleMeetingSignal)))
         .catch(() => undefined);
+      bumpDebug();
     }, 1000);
 
     return () => {
@@ -920,7 +993,7 @@ const MeetingRoom = () => {
       setPresentParticipants([]);
       setRemoteParticipants([]);
     };
-  }, [cameraOn, emitMediaState, joinedMeetingId, meetingId, screenSharing, sendSignalTo, transcriptLineFromText, user]);
+  }, [bumpDebug, cameraOn, emitMediaState, joinedMeetingId, meetingId, screenSharing, sendSignalTo, transcriptLineFromText, user]);
 
   // The room should show people who are actually present, not everyone invited.
   const participants = useMemo(() => {
@@ -1010,6 +1083,66 @@ const MeetingRoom = () => {
     participants.find((participant) => participantHasVisibleVideo(participant)) ??
     participants.find((participant) => participant.isSpeaking) ??
     participants[0];
+  const debugSnapshot = useMemo(() => {
+    const localTracks = localStream
+      ? {
+          audio: localStream.getAudioTracks().map((track) => debugTrack(track)),
+          video: localStream.getVideoTracks().map((track) => debugTrack(track))
+        }
+      : { audio: [], video: [] };
+
+    const peers = Object.entries(peersRef.current).map(([remoteUserId, peer]) => ({
+      remoteUserId,
+      connectionState: peer.connectionState,
+      iceConnectionState: peer.iceConnectionState,
+      iceGatheringState: peer.iceGatheringState,
+      signalingState: peer.signalingState,
+      senders: peer.getSenders().map((sender) => debugTrack(sender.track)),
+      receivers: peer.getReceivers().map((receiver) => debugTrack(receiver.track)),
+      pendingIce: pendingIceCandidatesRef.current[remoteUserId]?.length ?? 0
+    }));
+
+    const remotes = remoteParticipants.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      isCameraOn: participant.isCameraOn,
+      isMuted: participant.isMuted,
+      isScreenSharing: participant.isScreenSharing,
+      streamId: participant.stream?.id ?? null,
+      audioTracks: participant.stream?.getAudioTracks().map((track) => debugTrack(track)) ?? [],
+      videoTracks: participant.stream?.getVideoTracks().map((track) => debugTrack(track)) ?? []
+    }));
+
+    return {
+      debugTick,
+      mode: REALTIME_DISABLED ? "polling" : "socket",
+      joinedMeetingId,
+      meetingId,
+      meetingStatus: meeting?.status ?? null,
+      micOn,
+      cameraOn,
+      screenSharing,
+      localTracks,
+      presentParticipantIds: presentParticipants.map((participant) => participant.userId),
+      remoteParticipantIds: remoteParticipants.map((participant) => participant.id),
+      mainSpeakerId: mainSpeaker?.id ?? null,
+      peers,
+      remotes,
+      signals: signalDebugRef.current
+    };
+  }, [
+    cameraOn,
+    debugTick,
+    joinedMeetingId,
+    localStream,
+    mainSpeaker?.id,
+    meeting?.status,
+    meetingId,
+    micOn,
+    presentParticipants,
+    remoteParticipants,
+    screenSharing
+  ]);
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
   const meetingEndsAt = meeting
@@ -1463,6 +1596,14 @@ const MeetingRoom = () => {
             {/* Main speaker */}
             <div className="relative min-h-[40vh] flex-1 lg:min-h-0">
               <ParticipantTile participant={mainSpeaker} isPinned className="h-full w-full animate-scale-in" />
+              <div className="absolute left-4 top-4 z-20 max-h-[65vh] w-[min(30rem,calc(100%-2rem))] overflow-auto rounded-xl border border-amber-500/40 bg-black/80 p-3 font-mono text-[11px] text-amber-100 shadow-lg backdrop-blur">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">
+                  Meeting Debug
+                </div>
+                <pre className="whitespace-pre-wrap break-words">
+                  {JSON.stringify(debugSnapshot, null, 2)}
+                </pre>
+              </div>
             </div>
 
             {/* Side strip (desktop) / horizontal (mobile) */}
