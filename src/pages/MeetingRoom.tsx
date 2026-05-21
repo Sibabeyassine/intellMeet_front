@@ -1043,6 +1043,11 @@ const MeetingRoom = () => {
 
   const replaceLocalVideoTrack = (track: MediaStreamTrack) => {
     const stream = localStreamRef.current ?? new MediaStream();
+    stream.getVideoTracks().forEach((existingTrack) => {
+      if (existingTrack !== track) {
+        existingTrack.stop();
+      }
+    });
     stream.getVideoTracks().forEach((existingTrack) => stream.removeTrack(existingTrack));
     stream.addTrack(track);
     const nextStream = new MediaStream(stream.getTracks());
@@ -1068,7 +1073,32 @@ const MeetingRoom = () => {
     try {
       const stream = await ensureLocalStream();
       const next = !cameraOn;
-      stream.getVideoTracks().forEach((track) => { track.enabled = next; });
+
+      if (next) {
+        const currentTrack = cameraTrackRef.current;
+        const needsFreshTrack =
+          !currentTrack ||
+          currentTrack.readyState !== "live" ||
+          currentTrack.muted;
+
+        if (needsFreshTrack) {
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const [freshTrack] = videoStream.getVideoTracks();
+          if (!freshTrack) {
+            throw new Error("Camera track unavailable");
+          }
+
+          freshTrack.enabled = true;
+          cameraTrackRef.current = freshTrack;
+          replaceLocalVideoTrack(freshTrack);
+        } else {
+          currentTrack.enabled = true;
+          replaceLocalVideoTrack(currentTrack);
+        }
+      } else {
+        stream.getVideoTracks().forEach((track) => { track.enabled = false; });
+      }
+
       setCameraOn(next);
       emitMediaState({ cameraOn: next });
     } catch {
