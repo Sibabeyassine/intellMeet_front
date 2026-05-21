@@ -74,10 +74,6 @@ type MeetingParticipantsPayload = {
   participants?: RealtimeParticipantPresence[];
 };
 
-type SignalKind = "offer" | "answer" | "candidate" | "unknown";
-
-type SignalDebugCounters = Record<SignalKind, number>;
-
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 type SpeechRecognitionEvent = Event & {
   resultIndex: number;
@@ -130,27 +126,6 @@ function initialsFor(name: string) {
     .toUpperCase() || "PT";
 }
 
-function classifySignal(signal: RTCSessionDescriptionInit | RTCIceCandidateInit): SignalKind {
-  if ("type" in signal) {
-    if (signal.type === "offer") return "offer";
-    if (signal.type === "answer") return "answer";
-  }
-  if ("candidate" in signal) return "candidate";
-  return "unknown";
-}
-
-function debugTrack(track?: MediaStreamTrack | null) {
-  if (!track) return null;
-
-  return {
-    kind: track.kind,
-    id: track.id,
-    enabled: track.enabled,
-    muted: track.muted,
-    readyState: track.readyState
-  };
-}
-
 function meetingIncludesUser(meeting: Meeting, userId: string) {
   return (
     meeting.hostId === userId ||
@@ -198,13 +173,13 @@ const MeetingRoom = () => {
   const [renewingSession, setRenewingSession] = useState(false);
   const [joinedMeetingId, setJoinedMeetingId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [debugTick, setDebugTick] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const peersRef = useRef<Record<string, RTCPeerConnection>>({});
   const peerSendersRef = useRef<Record<string, {
     audio: RTCRtpSender | null;
     video: RTCRtpSender | null;
   }>>({});
+  const remoteStreamsRef = useRef<Record<string, MediaStream>>({});
   const pendingIceCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   const lastSignalAtRef = useRef<string | undefined>(undefined);
   const processedSignalIdsRef = useRef<Set<string>>(new Set());
@@ -214,23 +189,9 @@ const MeetingRoom = () => {
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const autoEndedRef = useRef(false);
   const mediaStateRef = useRef({ micOn, cameraOn, screenSharing });
-  const signalDebugRef = useRef<{
-    sent: SignalDebugCounters;
-    received: SignalDebugCounters;
-    lastSent: { to: string; kind: SignalKind; at: string } | null;
-    lastReceived: { from: string; kind: SignalKind; at: string } | null;
-  }>({
-    sent: { offer: 0, answer: 0, candidate: 0, unknown: 0 },
-    received: { offer: 0, answer: 0, candidate: 0, unknown: 0 },
-    lastSent: null,
-    lastReceived: null
-  });
   const makingOfferRef = useRef<Record<string, boolean>>({});
   const ignoreOfferRef = useRef<Record<string, boolean>>({});
   const signalQueueRef = useRef<Record<string, Promise<void>>>({});
-  const bumpDebug = useCallback(() => {
-    setDebugTick((value) => value + 1);
-  }, []);
   const emitMediaState = useCallback((
     state: { micOn?: boolean; cameraOn?: boolean; screenSharing?: boolean } = {}
   ) => {
@@ -250,14 +211,6 @@ const MeetingRoom = () => {
     signal: RTCSessionDescriptionInit | RTCIceCandidateInit
   ) => {
     if (!meetingId) return;
-    const kind = classifySignal(signal);
-    signalDebugRef.current.sent[kind] += 1;
-    signalDebugRef.current.lastSent = {
-      to: targetUserId,
-      kind,
-      at: new Date().toISOString()
-    };
-    bumpDebug();
     if (socketRef.current?.connected) {
       socketRef.current.emit("meeting:signal", {
         meetingId,
@@ -269,7 +222,7 @@ const MeetingRoom = () => {
       targetUserId,
       signal
     }).catch(() => undefined);
-  }, [bumpDebug, meetingId]);
+  }, [meetingId]);
 
   const syncPeerOutgoingTracks = useCallback(async (
     remoteUserId: string,
@@ -290,36 +243,30 @@ const MeetingRoom = () => {
 
     if (audioTrack && !senderState.audio) {
       senderState.audio = peer.addTrack(audioTrack, stream);
-      bumpDebug();
     } else if (
       audioTrack &&
       senderState.audio &&
       senderState.audio.track?.id !== audioTrack.id
     ) {
       await senderState.audio.replaceTrack(audioTrack);
-      bumpDebug();
     }
 
     if (videoTrack && !senderState.video) {
       senderState.video = peer.addTrack(videoTrack, stream);
-      bumpDebug();
     } else if (
       videoTrack &&
       senderState.video &&
       senderState.video.track?.id !== videoTrack.id
     ) {
       await senderState.video.replaceTrack(videoTrack);
-      bumpDebug();
     } else if (
       videoTrack &&
       senderState.video &&
       !senderState.video.track
     ) {
       await senderState.video.replaceTrack(videoTrack);
-      bumpDebug();
     } else if (!videoTrack && senderState.video?.track) {
       await senderState.video.replaceTrack(null);
-      bumpDebug();
     }
 
     if (peer.connectionState === "closed" || peer.signalingState !== "stable") return;
@@ -331,9 +278,8 @@ const MeetingRoom = () => {
       sendSignalTo(remoteUserId, offer);
     } finally {
       makingOfferRef.current[remoteUserId] = false;
-      bumpDebug();
     }
-  }, [bumpDebug, cameraOn, screenSharing, sendSignalTo]);
+  }, [cameraOn, screenSharing, sendSignalTo]);
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
@@ -353,9 +299,7 @@ const MeetingRoom = () => {
       Object.entries(peersRef.current).map(([remoteUserId, peer]) =>
         syncPeerOutgoingTracks(remoteUserId, peer, localStream)
       )
-    ).catch((error) => {
-      console.error("Outgoing track sync failed", error);
-    });
+    ).catch(() => undefined);
 
     emitMediaState();
   }, [cameraOn, emitMediaState, localStream, meetingId, screenSharing, syncPeerOutgoingTracks]);
@@ -544,6 +488,7 @@ const MeetingRoom = () => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
       delete peerSendersRef.current[userId];
+      delete remoteStreamsRef.current[userId];
       delete pendingIceCandidatesRef.current[userId];
       delete makingOfferRef.current[userId];
       delete ignoreOfferRef.current[userId];
@@ -608,60 +553,67 @@ const MeetingRoom = () => {
       peer.onicecandidate = (event) => {
         if (event.candidate) {
           sendSignalTo(remoteUserId, event.candidate.toJSON());
-          bumpDebug();
         }
       };
       peer.ontrack = (event) => {
-        const [stream] = event.streams;
-        if (stream) {
-          const updateRemoteVideoState = () => {
-            const hasLiveVideo = stream
-              .getVideoTracks()
-              .some((track) => track.readyState === "live" && !track.muted);
-            setRemoteParticipants((current) =>
-              current.map((item) =>
-                item.id === remoteUserId
-                  ? { ...item, isCameraOn: hasLiveVideo }
-                  : item
-              )
-            );
-          };
+        const stream =
+          event.streams[0] ??
+          remoteStreamsRef.current[remoteUserId] ??
+          new MediaStream();
+        remoteStreamsRef.current[remoteUserId] = stream;
 
-          stream.getVideoTracks().forEach((track) => {
-            track.onmute = updateRemoteVideoState;
-            track.onunmute = updateRemoteVideoState;
-            track.onended = updateRemoteVideoState;
-          });
+        if (!stream.getTracks().some((track) => track.id === event.track.id)) {
+          stream.addTrack(event.track);
+        }
 
+        const updateRemoteVideoState = () => {
           const hasLiveVideo = stream
             .getVideoTracks()
             .some((track) => track.readyState === "live" && !track.muted);
-          setRemoteParticipants((current) => {
-            const existing = current.find((item) => item.id === remoteUserId);
-            const name = existing?.name ?? "Participant";
-            const nextParticipant: RemoteParticipant = {
-              id: remoteUserId,
-              socketId: existing?.socketId,
-              name,
-              initials: existing?.initials ?? initialsFor(name),
-              color: existing?.color ?? "265 70% 60%",
-              isMuted: existing?.isMuted,
-              isCameraOn: hasLiveVideo,
-              stream
-            };
+          setRemoteParticipants((current) =>
+            current.map((item) =>
+              item.id === remoteUserId
+                ? { ...item, isCameraOn: hasLiveVideo, stream }
+                : item
+            )
+          );
+        };
 
-            if (!existing) return [...current, nextParticipant];
-            return current.map((item) =>
-              item.id === remoteUserId ? { ...item, ...nextParticipant } : item
-            );
-          });
-          updateRemoteVideoState();
-          bumpDebug();
+        if (event.track.kind === "video") {
+          event.track.onmute = updateRemoteVideoState;
+          event.track.onunmute = updateRemoteVideoState;
+          event.track.onended = () => {
+            stream.removeTrack(event.track);
+            updateRemoteVideoState();
+          };
         }
+
+        const hasLiveVideo = stream
+          .getVideoTracks()
+          .some((track) => track.readyState === "live" && !track.muted);
+        setRemoteParticipants((current) => {
+          const existing = current.find((item) => item.id === remoteUserId);
+          const name = existing?.name ?? "Participant";
+          const nextParticipant: RemoteParticipant = {
+            id: remoteUserId,
+            socketId: existing?.socketId,
+            name,
+            initials: existing?.initials ?? initialsFor(name),
+            color: existing?.color ?? "265 70% 60%",
+            isMuted: existing?.isMuted,
+            isCameraOn: hasLiveVideo,
+            stream
+          };
+
+          if (!existing) return [...current, nextParticipant];
+          return current.map((item) =>
+            item.id === remoteUserId ? { ...item, ...nextParticipant } : item
+          );
+        });
+        updateRemoteVideoState();
       };
       peer.onconnectionstatechange = () => {
         const state = peer.connectionState;
-        bumpDebug();
 
         if (state === "connected") {
           delete peerRetryAtRef.current[remoteUserId];
@@ -683,15 +635,6 @@ const MeetingRoom = () => {
             window.setTimeout(() => maybeInitiatePeerOffer(remoteUserId), 500);
           }
         }
-      };
-      peer.oniceconnectionstatechange = () => {
-        bumpDebug();
-      };
-      peer.onsignalingstatechange = () => {
-        bumpDebug();
-      };
-      peer.onicegatheringstatechange = () => {
-        bumpDebug();
       };
 
       return peer;
@@ -728,7 +671,6 @@ const MeetingRoom = () => {
         sendSignalTo(remoteUserId, offer);
       } finally {
         makingOfferRef.current[remoteUserId] = false;
-        bumpDebug();
       }
     };
 
@@ -971,14 +913,6 @@ const MeetingRoom = () => {
 
         const peer = peerFor(payload.fromUserId);
         const signal = payload.signal;
-        const kind = classifySignal(signal);
-        signalDebugRef.current.received[kind] += 1;
-        signalDebugRef.current.lastReceived = {
-          from: payload.fromUserId,
-          kind,
-          at: new Date().toISOString()
-        };
-        bumpDebug();
 
         try {
           if ("type" in signal && signal.type === "offer") {
@@ -989,7 +923,6 @@ const MeetingRoom = () => {
 
             ignoreOfferRef.current[payload.fromUserId] = !polite && offerCollision;
             if (ignoreOfferRef.current[payload.fromUserId]) {
-              bumpDebug();
               return;
             }
 
@@ -1017,9 +950,8 @@ const MeetingRoom = () => {
             }
             await peer.addIceCandidate(new RTCIceCandidate(signal));
           }
-        } catch (error) {
-          console.error("Realtime signal failed", error);
-          bumpDebug();
+        } catch {
+          return;
         }
       };
 
@@ -1043,7 +975,6 @@ const MeetingRoom = () => {
         announcePresence();
       }
       void syncPersistentPresence().catch(() => undefined);
-      bumpDebug();
     }, REALTIME_DISABLED ? 4000 : 3000);
     const meetingInterval = window.setInterval(() => {
       void api.meetings.get(meetingId).then((freshMeeting) => {
@@ -1055,7 +986,6 @@ const MeetingRoom = () => {
         .listSignals(meetingId, lastSignalAtRef.current)
         .then((signals) => Promise.all(signals.map(handleMeetingSignal)))
         .catch(() => undefined);
-      bumpDebug();
     }, REALTIME_DISABLED ? 1500 : 1000);
 
     return () => {
@@ -1073,7 +1003,7 @@ const MeetingRoom = () => {
       setPresentParticipants([]);
       setRemoteParticipants([]);
     };
-  }, [bumpDebug, cameraOn, emitMediaState, joinedMeetingId, meetingId, screenSharing, sendSignalTo, transcriptLineFromText, user]);
+  }, [cameraOn, emitMediaState, joinedMeetingId, meetingId, screenSharing, sendSignalTo, transcriptLineFromText, user]);
 
   // The room should show people who are actually present, not everyone invited.
   const participants = useMemo(() => {
@@ -1163,66 +1093,6 @@ const MeetingRoom = () => {
     participants.find((participant) => participantHasVisibleVideo(participant)) ??
     participants.find((participant) => participant.isSpeaking) ??
     participants[0];
-  const debugSnapshot = useMemo(() => {
-    const localTracks = localStream
-      ? {
-          audio: localStream.getAudioTracks().map((track) => debugTrack(track)),
-          video: localStream.getVideoTracks().map((track) => debugTrack(track))
-        }
-      : { audio: [], video: [] };
-
-    const peers = Object.entries(peersRef.current).map(([remoteUserId, peer]) => ({
-      remoteUserId,
-      connectionState: peer.connectionState,
-      iceConnectionState: peer.iceConnectionState,
-      iceGatheringState: peer.iceGatheringState,
-      signalingState: peer.signalingState,
-      senders: peer.getSenders().map((sender) => debugTrack(sender.track)),
-      receivers: peer.getReceivers().map((receiver) => debugTrack(receiver.track)),
-      pendingIce: pendingIceCandidatesRef.current[remoteUserId]?.length ?? 0
-    }));
-
-    const remotes = remoteParticipants.map((participant) => ({
-      id: participant.id,
-      name: participant.name,
-      isCameraOn: participant.isCameraOn,
-      isMuted: participant.isMuted,
-      isScreenSharing: participant.isScreenSharing,
-      streamId: participant.stream?.id ?? null,
-      audioTracks: participant.stream?.getAudioTracks().map((track) => debugTrack(track)) ?? [],
-      videoTracks: participant.stream?.getVideoTracks().map((track) => debugTrack(track)) ?? []
-    }));
-
-    return {
-      debugTick,
-      mode: REALTIME_DISABLED ? "polling" : "socket",
-      joinedMeetingId,
-      meetingId,
-      meetingStatus: meeting?.status ?? null,
-      micOn,
-      cameraOn,
-      screenSharing,
-      localTracks,
-      presentParticipantIds: presentParticipants.map((participant) => participant.userId),
-      remoteParticipantIds: remoteParticipants.map((participant) => participant.id),
-      mainSpeakerId: mainSpeaker?.id ?? null,
-      peers,
-      remotes,
-      signals: signalDebugRef.current
-    };
-  }, [
-    cameraOn,
-    debugTick,
-    joinedMeetingId,
-    localStream,
-    mainSpeaker?.id,
-    meeting?.status,
-    meetingId,
-    micOn,
-    presentParticipants,
-    remoteParticipants,
-    screenSharing
-  ]);
   const others = participants.filter(p => p.id !== mainSpeaker.id);
   const inviteUrl = meeting ? `${window.location.origin}/meeting/${meeting.id}` : window.location.href;
   const meetingEndsAt = meeting
@@ -1676,14 +1546,6 @@ const MeetingRoom = () => {
             {/* Main speaker */}
             <div className="relative min-h-[40vh] flex-1 lg:min-h-0">
               <ParticipantTile participant={mainSpeaker} isPinned className="h-full w-full animate-scale-in" />
-              <div className="absolute left-4 top-4 z-20 max-h-[65vh] w-[min(30rem,calc(100%-2rem))] overflow-auto rounded-xl border border-amber-500/40 bg-black/80 p-3 font-mono text-[11px] text-amber-100 shadow-lg backdrop-blur">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">
-                  Meeting Debug
-                </div>
-                <pre className="whitespace-pre-wrap break-words">
-                  {JSON.stringify(debugSnapshot, null, 2)}
-                </pre>
-              </div>
             </div>
 
             {/* Side strip (desktop) / horizontal (mobile) */}
