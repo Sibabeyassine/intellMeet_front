@@ -8,7 +8,7 @@ import { MeetingControls } from "@/features/meeting/MeetingControls";
 import { MeetingSidebar } from "@/features/meeting/MeetingSidebar";
 import { AIPanel } from "@/features/meeting/AIPanel";
 import { api, type ActionItem, type AISuggestion, type Meeting, type MeetingSignal, type MeetingSummary, type Participant, type TranscriptLine } from "@/services";
-import { resolveRealtimeUrl } from "@/services/realtime";
+import { isRealtimeEnabled, resolveRealtimeUrl } from "@/services/realtime";
 import { useUser } from "@/store/auth";
 import { useMeetingsStore } from "@/store/meetings";
 import { Logo } from "@/components/Logo";
@@ -19,9 +19,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const WS_URL = resolveRealtimeUrl();
-const REALTIME_DISABLED =
-  import.meta.env.VITE_DISABLE_REALTIME === "true" ||
-  /vercel\.app$/i.test(new URL(WS_URL).hostname);
+const REALTIME_ENABLED = isRealtimeEnabled();
+const REALTIME_DISABLED = !REALTIME_ENABLED;
 const SESSION_KEY = "intellmeet.http.session";
 const parseIceServers = (): RTCIceServer[] => {
   const value = import.meta.env.VITE_RTC_ICE_SERVERS;
@@ -222,6 +221,9 @@ const MeetingRoom = () => {
     lastSent: null,
     lastReceived: null
   });
+  const makingOfferRef = useRef<Record<string, boolean>>({});
+  const ignoreOfferRef = useRef<Record<string, boolean>>({});
+  const signalQueueRef = useRef<Record<string, Promise<void>>>({});
   const bumpDebug = useCallback(() => {
     setDebugTick((value) => value + 1);
   }, []);
@@ -293,11 +295,18 @@ const MeetingRoom = () => {
       await videoSender.replaceTrack(null);
     }
 
-    if (peer.signalingState !== "stable") return;
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    sendSignalTo(remoteUserId, offer);
-  }, [cameraOn, screenSharing, sendSignalTo]);
+    if (peer.connectionState === "closed" || peer.signalingState !== "stable") return;
+    makingOfferRef.current[remoteUserId] = true;
+    try {
+      const offer = await peer.createOffer();
+      if (peer.signalingState !== "stable") return;
+      await peer.setLocalDescription(offer);
+      sendSignalTo(remoteUserId, offer);
+    } finally {
+      makingOfferRef.current[remoteUserId] = false;
+      bumpDebug();
+    }
+  }, [bumpDebug, cameraOn, screenSharing, sendSignalTo]);
 
   useEffect(() => { void fetchMeetings(); }, [fetchMeetings]);
 
@@ -506,6 +515,9 @@ const MeetingRoom = () => {
       peersRef.current[userId]?.close();
       delete peersRef.current[userId];
       delete pendingIceCandidatesRef.current[userId];
+      delete makingOfferRef.current[userId];
+      delete ignoreOfferRef.current[userId];
+      delete signalQueueRef.current[userId];
     };
 
     const clearRemoteMedia = (userId: string) => {
@@ -669,11 +681,24 @@ const MeetingRoom = () => {
     const initiatePeerOffer = async (remoteUserId: string) => {
       const peer = peerFor(remoteUserId);
 
-      if (peer.signalingState !== "stable") return;
+      if (
+        peer.connectionState === "connected" ||
+        peer.connectionState === "connecting" ||
+        peer.signalingState !== "stable"
+      ) {
+        return;
+      }
 
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      sendSignalTo(remoteUserId, offer);
+      makingOfferRef.current[remoteUserId] = true;
+      try {
+        const offer = await peer.createOffer();
+        if (peer.signalingState !== "stable") return;
+        await peer.setLocalDescription(offer);
+        sendSignalTo(remoteUserId, offer);
+      } finally {
+        makingOfferRef.current[remoteUserId] = false;
+        bumpDebug();
+      }
     };
 
     const maybeInitiatePeerOffer = (remoteUserId: string) => {
@@ -906,47 +931,71 @@ const MeetingRoom = () => {
       if (payload.fromUserId === user.id) return;
       if (payload.targetUserId && payload.targetUserId !== user.id) return;
 
-      upsertPresence({
-        userId: payload.fromUserId,
-        name: payload.fromName,
-        email: payload.fromEmail
-      });
+      const run = async () => {
+        upsertPresence({
+          userId: payload.fromUserId,
+          name: payload.fromName,
+          email: payload.fromEmail
+        });
 
-      const peer = peerFor(payload.fromUserId);
-      const signal = payload.signal;
-      const kind = classifySignal(signal);
-      signalDebugRef.current.received[kind] += 1;
-      signalDebugRef.current.lastReceived = {
-        from: payload.fromUserId,
-        kind,
-        at: new Date().toISOString()
-      };
-      bumpDebug();
-
-      try {
-        if ("type" in signal && signal.type === "offer") {
-          await peer.setRemoteDescription(new RTCSessionDescription(signal));
-          await flushPendingIceCandidates(payload.fromUserId, peer);
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
-          sendSignalTo(payload.fromUserId, answer);
-        } else if ("type" in signal && signal.type === "answer") {
-          await peer.setRemoteDescription(new RTCSessionDescription(signal));
-          await flushPendingIceCandidates(payload.fromUserId, peer);
-        } else if ("candidate" in signal) {
-          if (!peer.remoteDescription) {
-            pendingIceCandidatesRef.current[payload.fromUserId] = [
-              ...(pendingIceCandidatesRef.current[payload.fromUserId] ?? []),
-              signal
-            ];
-            return;
-          }
-          await peer.addIceCandidate(new RTCIceCandidate(signal));
-        }
-      } catch (error) {
-        console.error("Realtime signal failed", error);
+        const peer = peerFor(payload.fromUserId);
+        const signal = payload.signal;
+        const kind = classifySignal(signal);
+        signalDebugRef.current.received[kind] += 1;
+        signalDebugRef.current.lastReceived = {
+          from: payload.fromUserId,
+          kind,
+          at: new Date().toISOString()
+        };
         bumpDebug();
-      }
+
+        try {
+          if ("type" in signal && signal.type === "offer") {
+            const polite = user.id > payload.fromUserId;
+            const offerCollision =
+              makingOfferRef.current[payload.fromUserId] ||
+              peer.signalingState !== "stable";
+
+            ignoreOfferRef.current[payload.fromUserId] = !polite && offerCollision;
+            if (ignoreOfferRef.current[payload.fromUserId]) {
+              bumpDebug();
+              return;
+            }
+
+            if (offerCollision && peer.signalingState !== "stable") {
+              await peer.setLocalDescription({ type: "rollback" });
+            }
+
+            await peer.setRemoteDescription(new RTCSessionDescription(signal));
+            await flushPendingIceCandidates(payload.fromUserId, peer);
+            const answer = await peer.createAnswer();
+            await peer.setLocalDescription(answer);
+            sendSignalTo(payload.fromUserId, answer);
+          } else if ("type" in signal && signal.type === "answer") {
+            if (peer.signalingState !== "have-local-offer") return;
+            await peer.setRemoteDescription(new RTCSessionDescription(signal));
+            await flushPendingIceCandidates(payload.fromUserId, peer);
+          } else if ("candidate" in signal) {
+            if (ignoreOfferRef.current[payload.fromUserId]) return;
+            if (!peer.remoteDescription) {
+              pendingIceCandidatesRef.current[payload.fromUserId] = [
+                ...(pendingIceCandidatesRef.current[payload.fromUserId] ?? []),
+                signal
+              ];
+              return;
+            }
+            await peer.addIceCandidate(new RTCIceCandidate(signal));
+          }
+        } catch (error) {
+          console.error("Realtime signal failed", error);
+          bumpDebug();
+        }
+      };
+
+      const previous = signalQueueRef.current[payload.fromUserId] ?? Promise.resolve();
+      const next = previous.then(run).catch(() => undefined);
+      signalQueueRef.current[payload.fromUserId] = next;
+      await next;
     };
 
     if (socket) {
@@ -964,19 +1013,19 @@ const MeetingRoom = () => {
       }
       void syncPersistentPresence().catch(() => undefined);
       bumpDebug();
-    }, REALTIME_DISABLED ? 1500 : 3000);
+    }, REALTIME_DISABLED ? 4000 : 3000);
     const meetingInterval = window.setInterval(() => {
       void api.meetings.get(meetingId).then((freshMeeting) => {
         setMeeting(freshMeeting);
       }).catch(() => undefined);
-    }, REALTIME_DISABLED ? 1500 : 5000);
+    }, REALTIME_DISABLED ? 10000 : 5000);
     const signalInterval = window.setInterval(() => {
       void api.meetings
         .listSignals(meetingId, lastSignalAtRef.current)
         .then((signals) => Promise.all(signals.map(handleMeetingSignal)))
         .catch(() => undefined);
       bumpDebug();
-    }, 1000);
+    }, REALTIME_DISABLED ? 1500 : 1000);
 
     return () => {
       window.clearInterval(presenceInterval);

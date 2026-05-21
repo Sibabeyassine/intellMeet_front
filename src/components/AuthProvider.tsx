@@ -3,9 +3,10 @@ import { io, Socket } from "socket.io-client";
 import { useAuthStore } from "@/store/auth";
 import { useNotificationsStore } from "@/store/notifications";
 import { useProjectsStore } from "@/store/projects";
-import { resolveRealtimeUrl } from "@/services/realtime";
+import { isRealtimeEnabled, resolveRealtimeUrl } from "@/services/realtime";
 
 const WS_URL = resolveRealtimeUrl();
+const REALTIME_ENABLED = isRealtimeEnabled();
 
 /**
  * Hydrates the session from storage on first mount and pulls notifications
@@ -38,6 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(interval);
   }, [session, fetchNotifs, clearNotifs]);
   useEffect(() => {
+    if (!REALTIME_ENABLED) return;
     if (!session?.accessToken) return;
 
     const socket: Socket = io(WS_URL, {
